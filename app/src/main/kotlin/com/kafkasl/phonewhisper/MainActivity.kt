@@ -436,7 +436,7 @@ class MainActivity : AppCompatActivity() {
         val acc = WhisperAccessibilityService.instance != null
         val useLocal = prefs().getBoolean("use_local", true)
         val usePostProcessing = prefs().getBoolean("use_post_processing", false)
-        val hasKey = !prefs().getString("api_key", "").isNullOrBlank()
+        val hasKey = SecurePrefs.hasApiKey(this)
         val hasModel = LocalTranscriber.availableModels(this).isNotEmpty()
         val selectedProvider = ProviderConfig.selected(prefs())
         val isCustomProvider = selectedProvider == Provider.CUSTOM
@@ -467,7 +467,7 @@ class MainActivity : AppCompatActivity() {
             Provider.CUSTOM -> "API key"
             else -> "OpenAI API key"
         }
-        val apiKey = prefs().getString("api_key", "") ?: ""
+        val apiKey = SecurePrefs.getApiKey(this)
         keyRowSub.text = when {
             apiKey.isBlank() -> "Tap to set"
             apiKey.length > 7 -> "${apiKey.take(3)}...${apiKey.takeLast(4)}"
@@ -510,14 +510,14 @@ class MainActivity : AppCompatActivity() {
         }
         val input = EditText(this).apply {
             this.hint = hint
-            setText(prefs().getString("api_key", ""))
+            setText(SecurePrefs.getApiKey(this))
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
         }
         android.app.AlertDialog.Builder(this)
             .setTitle("${provider.displayName} API key")
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
-                prefs().edit().putString("api_key", input.text.toString().trim()).apply()
+                SecurePrefs.putApiKey(this, input.text.toString())
                 refresh()
             }
             .setNegativeButton("Cancel", null)

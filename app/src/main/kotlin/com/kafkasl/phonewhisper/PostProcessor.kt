@@ -80,6 +80,21 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
         }
     }
 
+    // Guard chat input/output size: transcripts are ~100–500 chars, prompts ~2–4k.
+    // Clip obvious abuse and bound response handling before it reaches clipboard.
+    const val MAX_INPUT_CHARS = 12_000
+    const val MAX_PROMPT_CHARS = 12_000
+    const val MAX_OUTPUT_CHARS = 12_000
+
+    fun sanitizedPrompt(prompt: String): String =
+        if (prompt.length > MAX_PROMPT_CHARS) prompt.take(MAX_PROMPT_CHARS) else prompt
+
+    fun sanitizedText(text: String): String =
+        if (text.length > MAX_INPUT_CHARS) text.take(MAX_INPUT_CHARS) else text
+
+    fun truncatedOutput(text: String): String =
+        if (text.length > MAX_OUTPUT_CHARS) text.take(MAX_OUTPUT_CHARS) else text
+
     fun process(
         text: String,
         prompt: String,
@@ -88,14 +103,16 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
         chatModel: String = "gpt-4o-mini",
         callback: (Result) -> Unit,
     ) {
+        val safePrompt = sanitizedPrompt(prompt)
+        val safeText = sanitizedText(text)
         val messages = JSONArray().apply {
             put(JSONObject().apply {
                 put("role", "system")
-                put("content", prompt)
+                put("content", safePrompt)
             })
             put(JSONObject().apply {
                 put("role", "user")
-                put("content", text)
+                put("content", safeText)
             })
         }
 
@@ -124,7 +141,9 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
                     callback(Result(null, "HTTP ${response.code}"))
                     return
                 }
-                callback(parseResponse(responseBody))
+                val parsed = parseResponse(responseBody)
+                val capped = parsed.text?.let { truncatedOutput(it) }
+                callback(if (capped != null) Result(capped, null) else parsed)
             }
         })
     }

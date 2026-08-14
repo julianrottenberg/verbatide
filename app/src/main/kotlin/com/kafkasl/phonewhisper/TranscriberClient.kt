@@ -26,6 +26,9 @@ object TranscriberClient {
         Result(null, e.message ?: "Parse error")
     }
 
+    const val MAX_WAV_BYTES = 25 * 1024 * 1024 // OpenAI's typical 25 MB audio cap
+    const val MAX_RESPONSE_CHARS = 20_000
+
     fun transcribe(
         wavData: ByteArray,
         apiKey: String,
@@ -33,6 +36,10 @@ object TranscriberClient {
         sttModel: String = "whisper-1",
         callback: (Result) -> Unit,
     ) {
+        if (wavData.size > MAX_WAV_BYTES) {
+            callback(Result(null, "Audio too large (${wavData.size / (1024*1024)} MB > 25 MB)"))
+            return
+        }
         val body = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("model", sttModel)
@@ -54,7 +61,13 @@ object TranscriberClient {
                     callback(Result(null, "HTTP ${response.code}"))
                     return
                 }
-                callback(parseResponse(body))
+                if (body.length > MAX_RESPONSE_CHARS + 2048) {
+                    callback(Result(null, "Response too large (${body.length} chars)"))
+                    return
+                }
+                val parsed = parseResponse(body)
+                val capped = parsed.text?.take(MAX_RESPONSE_CHARS)
+                callback(if (capped != null) Result(capped, null) else parsed)
             }
         })
     }

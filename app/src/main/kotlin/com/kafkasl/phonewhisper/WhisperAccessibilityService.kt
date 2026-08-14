@@ -398,7 +398,12 @@ class WhisperAccessibilityService : AccessibilityService() {
 
     private fun transcribeApi(pcm: ByteArray) {
         val wav = WavWriter.encode(pcm)
-        val apiKey = prefs().getString("api_key", "") ?: ""
+        // Cap recording length: 16kHz mono 16-bit = 32kB/s → 5 min ≈ 9.6 MB WAV
+        if (wav.size > TranscriberClient.MAX_WAV_BYTES) {
+            reset("Recording too long — try a shorter dictation")
+            return
+        }
+        val apiKey = SecurePrefs.getApiKey(this)
         if (apiKey.isBlank()) { reset("Set API key in Phone Whisper app"); return }
 
         val p = prefs()
@@ -433,7 +438,7 @@ class WhisperAccessibilityService : AccessibilityService() {
         }
 
         val usePostProcessing = prefs().getBoolean("use_post_processing", false)
-        val apiKey = prefs().getString("api_key", "") ?: ""
+        val apiKey = SecurePrefs.getApiKey(this)
 
         if (usePostProcessing) {
             if (apiKey.isBlank()) {
