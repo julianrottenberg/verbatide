@@ -44,10 +44,9 @@ jobs:
           retention-days: 30
 
   codeql:
-    # CodeQL needs Advanced Security (not available for private repos on Free).
-    # Keep the job as opt-in: it only runs when code scanning is enabled.
-    # Once you enable Advanced Security or make the repo public, flip this to true or remove the guard.
-    if: false
+    # Now public — CodeQL default setup can run. Remove the guard if you prefer
+    # the workflow-based CodeQL below; alternatively keep both or use default setup.
+    if: github.repository == 'julianrottenberg/phone-whisper-fork'
     runs-on: ubuntu-latest
     permissions:
       contents: read
