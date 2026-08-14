@@ -95,14 +95,16 @@ object ModelDownloader {
         }
     }
 
-    /** Extract tar.bz2 to outDir. Validates paths to prevent traversal. */
+    /** Extract tar.bz2 to outDir. Validates paths to prevent traversal (Zip Slip). */
     fun extractTarBz2(archive: File, outDir: File) {
         outDir.mkdirs()
+        val canonicalOutDir = outDir.canonicalFile
         val bzIn = BZip2CompressorInputStream(BufferedInputStream(FileInputStream(archive)))
         TarArchiveInputStream(bzIn).use { tar ->
             generateSequence { tar.nextEntry }.forEach { entry ->
-                val dest = File(outDir, entry.name)
-                require(dest.canonicalPath.startsWith(outDir.canonicalPath)) {
+                // lgtm[java/zipslip] — canonicalFile + startsWith check below sanitizes entry.name
+                val dest = File(canonicalOutDir, entry.name).canonicalFile
+                require(dest.toPath().startsWith(canonicalOutDir.toPath())) {
                     "Path traversal: ${entry.name}"
                 }
                 if (entry.isDirectory) dest.mkdirs()
