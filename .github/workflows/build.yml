@@ -7,6 +7,10 @@ on:
   workflow_dispatch:
   release:
     types: [published]
+  # Also trigger on tags so pushing v* creates a Release with the APK.
+  # (release job handles publishing; no duplication on main push.)
+  # Tags match v* pattern.
+  tags: ["v*"]
 
 permissions:
   contents: read
@@ -43,38 +47,8 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  codeql:
-    # Now public — CodeQL default setup can run. Remove the guard if you prefer
-    # the workflow-based CodeQL below; alternatively keep both or use default setup.
-    if: github.repository == 'julianrottenberg/phone-whisper-fork'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-          cache: gradle
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: java-kotlin
-          build-mode: manual
-      - name: Build (for CodeQL)
-        run: ./gradlew assembleDebug --stacktrace
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
-        with:
-          category: "/language:java-kotlin"
-
   release:
-    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
     permissions:
