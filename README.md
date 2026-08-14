@@ -2,34 +2,68 @@
   <img src="docs/logo.svg" width="128" height="128" alt="Phone Whisper Logo">
 </p>
 
-# Phone Whisper
+# Phone Whisper — Fork (Groq / OpenRouter / Custom providers)
 
-Push-to-talk dictation for Android.
+> Fork of [kafkasl/phone-whisper](https://github.com/kafkasl/phone-whisper) — push-to-talk dictation for Android with support for **OpenAI**, **Groq**, **OpenRouter**, and any **custom OpenAI-compatible** endpoint.
 
-Phone Whisper lets you speak into most apps without switching keyboards. Tap the floating button, speak, tap again, and your text is inserted into the currently focused text field when the app exposes a standard Android input field.\
+Phone Whisper lets you speak into most apps without switching keyboards. Tap the floating button, speak, tap again, and your text is inserted into the currently focused text field when the app exposes a standard Android input field.
 
-It supports:
+**What's new in this fork:**
+
+- **Groq** — `whisper-large-v3-turbo` STT + `llama-3.3-70b-versatile` chat, via `api.groq.com/openai/v1`
+- **OpenRouter** — proxy STT + chat through OpenRouter (`openrouter.ai/api/v1`) with configurable model slugs
+- **Custom** — point STT and chat at any OpenAI-compatible base URL (self-hosted, proxy, other provider) with per-endpoint model names
+- **Provider picker in Settings** — radio group + detail rows; API key hint/label adapts to the selected provider
+
+The underlying HTTP contract is identical across all providers (`/v1/audio/transcriptions` multipart + `/v1/chat/completions` JSON with `Bearer` auth), so switching is just a base-URL + model-name swap.
+
+Upstream features preserved as-is:
 
 - **Local on-device transcription** with sherpa-onnx
-- **Cloud transcription** with OpenAI Whisper
-- **Optional cleanup** with OpenAI to fix punctuation and grammar
+- **Floating overlay bubble** + accessibility text injection
+- **Optional cleanup** (configurable prompt) via chat completions
 
-If you try it and it genuinely saves you time, consider [sponsoring](https://github.com/sponsors/kafkasl)
+If this fork saves you time, consider sponsoring upstream: [github.com/sponsors/kafkasl](https://github.com/sponsors/kafkasl)
 
+---
 
-## Why I built this
+## Why this fork
 
-- I like SwiftKey and want to keep it as keyboard but...
-- Most keyboard dictation felt too inaccurate
-- Gemini's voice input auto submits your transcription (which is pretty bad) so you can't edit it before sending
-- Post processing yields much better results, specially adding a list of keywords and technical terms you often use
-- Inserting text into the field you're already using lets you keep editing it like any other draft.
+See upstream's [Why I built this](#why-i-built-this) below. The short version: the original app only spoke to `api.openai.com`. Groq and OpenRouter are OpenAI-compatible but need different base URLs + model names — and some people want to hit a self-hosted endpoint entirely. This fork makes that a Settings toggle.
+
+---
+
+## Provider setup
+
+1. In **Settings → Cloud provider**, pick **OpenAI**, **Groq**, **OpenRouter**, or **Custom**.
+2. For **Custom**, tap through the four endpoint/model rows to set:
+   - STT endpoint (default: OpenAI's)
+   - STT model name
+   - Chat endpoint
+   - Chat model name
+   Leave any field blank to fall back to the OpenAI default for that slot.
+3. Set your **API key** — the row label + hint (`sk-…` / `gsk_…` / `sk-or-…`) adapts to the provider. One key is used for both STT and cleanup (use a single provider for both, or Custom if you want to split them across URLs).
+4. Toggle **Use cloud transcription** on and pick your cleanup prompt under **Post-Processing** as usual.
+
+Groq model defaults: STT `whisper-large-v3-turbo`, chat `llama-3.3-70b-versatile`.
+OpenRouter defaults: STT `openai/whisper-large-v3`, chat `openai/gpt-4o-mini` (override with any OpenRouter slug).
+
+---
+
+## How it works
+
+1. A small overlay button floats on screen
+2. Tap once to start recording
+3. Tap again to stop
+4. Audio is transcribed locally or in the cloud (selected provider's `/v1/audio/transcriptions`)
+5. Optionally, the transcript is cleaned up via the provider's `/v1/chat/completions`
+6. The text is inserted into the focused text field; clipboard fallback if injection fails
 
 ## Install
 
 ### Easiest: download the APK
 
-Grab the latest APK from [GitHub Releases](https://github.com/kafkasl/phone-whisper/releases).
+Grab the latest APK from [GitHub Releases](https://github.com/julianrottenberg/phone-whisper-fork/releases) (once CI is wired up).
 
 Open it on your phone, install it, then launch the app once to finish setup.
 
@@ -38,7 +72,7 @@ Open it on your phone, install it, then launch the app once to finish setup.
 Requires JDK 17 and Android SDK.
 
 ```bash
-git clone https://github.com/kafkasl/phone-whisper.git && cd phone-whisper
+git clone https://github.com/julianrottenberg/phone-whisper-fork.git && cd phone-whisper-fork
 make build
 ```
 
@@ -54,15 +88,6 @@ If you use ADB:
 make adb-install
 ```
 
-## How it works
-
-1. A small overlay button floats on screen
-2. Tap once to start recording
-3. Tap again to stop
-4. Audio is transcribed locally or in the cloud
-5. The text is inserted into the focused text field
-6. If insertion fails, the text is copied to the clipboard
-
 ## Setup
 
 ### First-time setup
@@ -72,7 +97,7 @@ make adb-install
 3. Enable the **Accessibility Service**
 4. Choose your transcription mode:
    - **Local**: download a model in the app
-   - **Cloud**: paste your OpenAI API key
+   - **Cloud**: pick a provider and paste your API key
 
 Once setup is done, the floating button is ready.
 
@@ -84,15 +109,14 @@ It does **not** replace your keyboard. It does **not** run background automation
 
 ## Privacy
 
-Phone Whisper supports two modes:
+This fork does not run a backend. In cloud mode, requests go straight from your phone to your selected provider using your own API key.
 
 - **Local mode**: audio stays on-device
-- **Cloud mode**: audio is sent directly from your device to OpenAI's transcription API
-- **Optional cleanup**: transcript text is sent directly from your device to OpenAI's chat API
+- **Cloud mode**: audio is sent directly from your device to the configured provider's transcription API
+- **Optional cleanup**: transcript text is sent directly from your device to the configured provider's chat API
+- Your API key and custom endpoints are stored locally on-device in app storage
 
-I don't run a backend for this app. In cloud mode, requests go straight from your phone to OpenAI using your own API key.
-
-Full policy: [PRIVACY.md](PRIVACY.md)
+Full upstream policy: [PRIVACY.md](PRIVACY.md)
 
 ## Local models
 
@@ -147,14 +171,28 @@ Once text is inserted into the native input box, Termux sends it to the terminal
 - Some apps may block paste or text injection
 - Some apps use custom input surfaces instead of standard Android text fields
 - Local models are large
-- Cloud mode requires your own OpenAI API key
+- Cloud mode requires your own API key
+
+---
+
+# Upstream
+
+The sections below are from upstream's README.
+
+## Why I built this (upstream)
+
+- I like SwiftKey and want to keep it as keyboard but...
+- Most keyboard dictation felt too inaccurate
+- Gemini's voice input auto submits your transcription (which is pretty bad) so you can't edit it before sending
+- Post processing yields much better results, specially adding a list of keywords and technical terms you often use
+- Inserting text into the field you're already using lets you keep editing it like any other draft.
 
 ## Support the project
 
-If Phone Whisper saves you time, you can sponsor the project on GitHub:
+If Phone Whisper saves you time, you can sponsor the upstream project on GitHub:
 
 - https://github.com/sponsors/kafkasl
 
 ## License
 
-Personal project. Do whatever you want with it.
+Personal project. Do whatever you want with it. See upstream [LICENSE](LICENSE) if present.

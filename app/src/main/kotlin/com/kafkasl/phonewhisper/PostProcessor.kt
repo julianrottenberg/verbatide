@@ -76,7 +76,14 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
         }
     }
 
-    fun process(text: String, prompt: String, apiKey: String, callback: (Result) -> Unit) {
+    fun process(
+        text: String,
+        prompt: String,
+        apiKey: String,
+        chatUrl: String = "https://api.openai.com/v1/chat/completions",
+        chatModel: String = "gpt-4o-mini",
+        callback: (Result) -> Unit,
+    ) {
         val messages = JSONArray().apply {
             put(JSONObject().apply {
                 put("role", "system")
@@ -89,7 +96,7 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
         }
 
         val bodyJson = JSONObject().apply {
-            put("model", "gpt-4o-mini")
+            put("model", chatModel)
             put("messages", messages)
             put("temperature", 0.0)
         }
@@ -97,7 +104,7 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
         val body = bodyJson.toString().toRequestBody("application/json".toMediaType())
 
         val request = Request.Builder()
-            .url("https://api.openai.com/v1/chat/completions")
+            .url(chatUrl)
             .header("Authorization", "Bearer $apiKey")
             .post(body)
             .build()

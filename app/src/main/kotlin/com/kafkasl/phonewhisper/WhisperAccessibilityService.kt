@@ -401,7 +401,13 @@ class WhisperAccessibilityService : AccessibilityService() {
         val apiKey = prefs().getString("api_key", "") ?: ""
         if (apiKey.isBlank()) { reset("Set API key in Phone Whisper app"); return }
 
-        TranscriberClient.transcribe(wav, apiKey) { result ->
+        val p = prefs()
+        TranscriberClient.transcribe(
+            wavData = wav,
+            apiKey = apiKey,
+            sttUrl = ProviderConfig.sttUrl(p),
+            sttModel = ProviderConfig.sttModel(p),
+        ) { result ->
             if (result.text != null && result.text.isNotBlank()) {
                 handleTranscriptionResult(result.text)
             } else {
@@ -442,8 +448,14 @@ class WhisperAccessibilityService : AccessibilityService() {
             }
 
             val prompt = prefs().getString("post_processing_prompt", PostProcessor.DEFAULT_PROMPT) ?: PostProcessor.DEFAULT_PROMPT
-            
-            PostProcessor.process(text, prompt, apiKey) { result ->
+            val p2 = prefs()
+            PostProcessor.process(
+                text = text,
+                prompt = prompt,
+                apiKey = apiKey,
+                chatUrl = ProviderConfig.chatUrl(p2),
+                chatModel = ProviderConfig.chatModel(p2),
+            ) { result ->
                 handler.post {
                     if (result.text != null && result.text.isNotBlank()) {
                         injectText(result.text)

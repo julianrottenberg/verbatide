@@ -22,15 +22,21 @@ object TranscriberClient {
         Result(null, e.message ?: "Parse error")
     }
 
-    fun transcribe(wavData: ByteArray, apiKey: String, callback: (Result) -> Unit) {
+    fun transcribe(
+        wavData: ByteArray,
+        apiKey: String,
+        sttUrl: String = "https://api.openai.com/v1/audio/transcriptions",
+        sttModel: String = "whisper-1",
+        callback: (Result) -> Unit,
+    ) {
         val body = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
-            .addFormDataPart("model", "whisper-1")
+            .addFormDataPart("model", sttModel)
             .addFormDataPart("file", "audio.wav", wavData.toRequestBody("audio/wav".toMediaType()))
             .build()
 
         val request = Request.Builder()
-            .url("https://api.openai.com/v1/audio/transcriptions")
+            .url(sttUrl)
             .header("Authorization", "Bearer $apiKey")
             .post(body)
             .build()
