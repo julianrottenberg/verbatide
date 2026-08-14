@@ -154,6 +154,31 @@ object ProviderConfig {
         }.apply()
     }
 
+    fun isValidCustomUrl(raw: String): Boolean {
+        val t = raw.trim()
+        if (t.isBlank()) return false
+        return try {
+            val u = java.net.URL(t)
+            (u.protocol == "https" || u.protocol == "http") && u.host.isNotBlank()
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun validateCustomUrlOrNull(raw: String): String? {
+        val t = raw.trim()
+        if (t.isBlank()) return null
+        if (!isValidCustomUrl(t)) return null
+        // Disallow bare http except for loopback (self-hosted dev). Warn upstream
+        // by normalizing only; the caller decides whether to show a warning.
+        return normalizeUrl(t)
+    }
+
+    fun isLoopbackHttp(url: String): Boolean = try {
+        val u = java.net.URL(url)
+        u.protocol == "http" && (u.host == "localhost" || u.host == "127.0.0.1" || u.host == "::1")
+    } catch (_: Exception) { false }
+
     private fun normalizeUrl(raw: String): String = raw.trim().trimEnd('/')
 
     /** Human-readable summary for the Settings row subtitle. */

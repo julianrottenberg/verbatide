@@ -5,14 +5,14 @@ plugins {
 
 android {
     namespace = "com.kafkasl.phonewhisper"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.kafkasl.phonewhisper"
         minSdk = 30
-        targetSdk = 34
-        versionCode = 2
-        versionName = "0.3.0"
+        targetSdk = 35
+        versionCode = 3
+        versionName = "0.3.1"
 
         ndk { abiFilters += "arm64-v8a" }
     }
@@ -31,7 +31,7 @@ android {
 dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("com.google.android.material:material:1.12.0")
     implementation("org.apache.commons:commons-compress:1.27.1")
 

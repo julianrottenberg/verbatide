@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Exclude API keys and custom endpoints from auto-backup / device transfer. -->
+    <exclude domain="sharedpref" path="phonewhisper.xml" />
+</full-backup-content>

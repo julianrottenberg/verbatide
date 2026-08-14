@@ -38,7 +38,10 @@ object ModelDownloader {
     private const val BASE_URL =
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models"
     private val client = OkHttpClient.Builder()
-        .readTimeout(60, TimeUnit.SECONDS).build()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .build()
 
     fun modelDir(ctx: Context, model: Model) =
         File(ctx.filesDir, "models/${model.archive}")

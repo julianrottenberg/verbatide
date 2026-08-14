@@ -534,7 +534,16 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Custom STT endpoint")
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
-                ProviderConfig.saveCustom(prefs(), sttUrl = input.text.toString())
+                val raw = input.text.toString().trim()
+                if (raw.isNotBlank() && !ProviderConfig.isValidCustomUrl(raw)) {
+                    toast("Invalid URL — must be http(s)://…")
+                    return@setPositiveButton
+                }
+                if (raw.isNotBlank() && raw.startsWith("http://") && !ProviderConfig.isLoopbackHttp(raw)) {
+                    toast("http:// only allowed for localhost — use https://")
+                    return@setPositiveButton
+                }
+                ProviderConfig.saveCustom(prefs(), sttUrl = raw)
                 refresh()
             }
             .setNegativeButton("Cancel", null)
@@ -567,7 +576,16 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Custom chat endpoint")
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
-                ProviderConfig.saveCustom(prefs(), chatUrl = input.text.toString())
+                val raw = input.text.toString().trim()
+                if (raw.isNotBlank() && !ProviderConfig.isValidCustomUrl(raw)) {
+                    toast("Invalid URL — must be http(s)://…")
+                    return@setPositiveButton
+                }
+                if (raw.isNotBlank() && raw.startsWith("http://") && !ProviderConfig.isLoopbackHttp(raw)) {
+                    toast("http:// only allowed for localhost — use https://")
+                    return@setPositiveButton
+                }
+                ProviderConfig.saveCustom(prefs(), chatUrl = raw)
                 refresh()
             }
             .setNegativeButton("Cancel", null)

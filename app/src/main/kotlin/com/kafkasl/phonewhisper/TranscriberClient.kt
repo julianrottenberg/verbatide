@@ -9,7 +9,11 @@ import java.io.IOException
 object TranscriberClient {
     data class Result(val text: String?, val error: String?)
 
-    private val client = OkHttpClient()
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+        .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
 
     fun parseResponse(json: String): Result = try {
         val obj = JSONObject(json)
@@ -41,10 +45,17 @@ object TranscriberClient {
             .post(body)
             .build()
 
+        // OkHttp validates the URL scheme; caller should pre-validate custom URLs.
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) = callback(Result(null, e.message))
-            override fun onResponse(call: Call, response: Response) =
-                callback(parseResponse(response.body?.string() ?: ""))
+            override fun onResponse(call: Call, response: Response) {
+                val body = response.body?.string() ?: ""
+                if (!response.isSuccessful && body.isBlank()) {
+                    callback(Result(null, "HTTP ${response.code}"))
+                    return
+                }
+                callback(parseResponse(body))
+            }
         })
     }
 }
