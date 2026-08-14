@@ -3,14 +3,11 @@ name: Build
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
   release:
     types: [published]
-  # Also trigger on tags so pushing v* creates a Release with the APK.
-  # (release job handles publishing; no duplication on main push.)
-  # Tags match v* pattern.
-  tags: ["v*"]
 
 permissions:
   contents: read
