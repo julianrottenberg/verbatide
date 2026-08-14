@@ -508,16 +508,17 @@ class MainActivity : AppCompatActivity() {
             Provider.OPENROUTER -> "sk-or-..."
             else -> "sk-..."
         }
+        val outer = this
         val input = EditText(this).apply {
             this.hint = hint
-            setText(SecurePrefs.getApiKey(this))
+            setText(SecurePrefs.getApiKey(outer))
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
         }
         android.app.AlertDialog.Builder(this)
             .setTitle("${provider.displayName} API key")
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
-                SecurePrefs.putApiKey(this, input.text.toString())
+                SecurePrefs.putApiKey(outer, input.text.toString())
                 refresh()
             }
             .setNegativeButton("Cancel", null)
