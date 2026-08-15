@@ -95,12 +95,36 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
     fun truncatedOutput(text: String): String =
         if (text.length > MAX_OUTPUT_CHARS) text.take(MAX_OUTPUT_CHARS) else text
 
+    /**
+     * Reasoning effort for thinking-capable chat models.
+     *
+     * Not all providers/models accept the same wire format:
+     *  - OpenAI (o1/gpt-5 family) + Groq use `reasoning_effort` ("low"|"medium"|"high").
+     *  - OpenRouter uses a `reasoning` object: {"effort": ...} or {"enabled": false}.
+     * We send whichever applies for the selected endpoint; providers that don't
+     * know a field simply ignore it.
+     */
+    enum class Reasoning(val key: String, val label: String, val subtitle: String) {
+        DEFAULT("default", "Provider default", "Use whatever the model/provider defaults to"),
+        OFF("off", "Off", "Disable reasoning (OpenRouter only; others ignore)"),
+        LOW("low", "Low", "Minimal thinking — fastest/cheapest for cleanup"),
+        MEDIUM("medium", "Medium", "Balanced thinking"),
+        HIGH("high", "High", "Maximum thinking (slowest, rarely useful for cleanup)"),
+        ;
+
+        companion object {
+            fun fromKey(key: String?): Reasoning =
+                entries.firstOrNull { it.key == key } ?: DEFAULT
+        }
+    }
+
     fun process(
         text: String,
         prompt: String,
         apiKey: String,
         chatUrl: String = "https://api.openai.com/v1/chat/completions",
         chatModel: String = "gpt-4o-mini",
+        reasoning: Reasoning = Reasoning.DEFAULT,
         callback: (Result) -> Unit,
     ) {
         val safePrompt = sanitizedPrompt(prompt)
@@ -120,6 +144,7 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
             put("model", chatModel)
             put("messages", messages)
             put("temperature", 0.0)
+            applyReasoning(this, chatUrl, reasoning)
         }
 
         val body = bodyJson.toString().toRequestBody("application/json".toMediaType())
@@ -146,5 +171,27 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
                 callback(if (capped != null) Result(capped, null) else parsed)
             }
         })
+    }
+
+    private fun applyReasoning(bodyJson: JSONObject, chatUrl: String, reasoning: Reasoning) {
+        if (reasoning == Reasoning.DEFAULT) return
+        val isOpenRouter = chatUrl.contains("openrouter.ai")
+        if (isOpenRouter) {
+            // OpenRouter: reasoning: {"effort": "low"} or {"enabled": false}
+            val obj = JSONObject()
+            if (reasoning == Reasoning.OFF) {
+                obj.put("enabled", false)
+            } else {
+                obj.put("effort", reasoning.key)
+            }
+            bodyJson.put("reasoning", obj)
+        } else {
+            // OpenAI / Groq / OpenAI-compatible: reasoning_effort: "low" (no "off" —
+            // unsupported fields are ignored by providers, and models that don't
+            // reason at all don't care either).
+            if (reasoning != Reasoning.OFF) {
+                bodyJson.put("reasoning_effort", reasoning.key)
+            }
+        }
     }
 }

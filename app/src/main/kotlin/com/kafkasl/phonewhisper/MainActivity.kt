@@ -38,6 +38,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var customSttModelSub: TextView
     private lateinit var customChatUrlSub: TextView
     private lateinit var customChatModelSub: TextView
+    private lateinit var reasoningRowSub: TextView
+    private lateinit var reasoningRow: LinearLayout
 
     private val modelRows = mutableMapOf<String, ModelRowViews>()
     private val promptRows = mutableMapOf<String, PromptRowViews>()
@@ -188,6 +190,10 @@ class MainActivity : AppCompatActivity() {
         promptRowSub.maxLines = 2
         promptRowSub.ellipsize = android.text.TextUtils.TruncateAt.END
         root.addView(promptRow)
+
+        reasoningRow = settingsRow("Reasoning effort", currentReasoningLabel()) { promptReasoning() }
+        reasoningRowSub = reasoningRow.findViewWithTag("subtitle")
+        root.addView(reasoningRow)
 
         // --- API Key ---
         root.addView(sectionHeader("API key"))
@@ -450,6 +456,8 @@ class MainActivity : AppCompatActivity() {
         customProviderContainer.visibility = if (!useLocal && isCustomProvider) View.VISIBLE else View.GONE
         promptContainer.visibility = if (usePostProcessing) View.VISIBLE else View.GONE
         promptRow.visibility = if (usePostProcessing) View.VISIBLE else View.GONE
+        reasoningRow.visibility = if (usePostProcessing) View.VISIBLE else View.GONE
+        reasoningRowSub.text = currentReasoningLabel()
 
         // Provider summary + radio states
         providerSummarySub.text = ProviderConfig.summary(prefs())
@@ -627,6 +635,32 @@ class MainActivity : AppCompatActivity() {
                     .putString("custom_post_processing_prompt", finalPrompt)
                     .putString("post_processing_prompt", finalPrompt)
                     .apply()
+                refresh()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    // --- Reasoning effort ---
+
+    private fun currentReasoning(): PostProcessor.Reasoning =
+        PostProcessor.Reasoning.fromKey(prefs().getString("reasoning_effort", "default"))
+
+    private fun currentReasoningLabel(): String {
+        val r = currentReasoning()
+        return "${r.label} — ${r.subtitle}"
+    }
+
+    private fun promptReasoning() {
+        val options = PostProcessor.Reasoning.entries
+        val labels = options.map { it.label }.toTypedArray()
+        val current = options.indexOf(currentReasoning()).coerceAtLeast(0)
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Reasoning effort")
+            .setSingleChoiceItems(labels, current) { dialog, which ->
+                val selected = options[which]
+                prefs().edit().putString("reasoning_effort", selected.key).apply()
+                dialog.dismiss()
                 refresh()
             }
             .setNegativeButton("Cancel", null)
