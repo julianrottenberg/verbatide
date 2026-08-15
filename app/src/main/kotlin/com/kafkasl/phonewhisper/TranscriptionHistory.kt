@@ -108,4 +108,11 @@ object HistoryManager {
     } catch (_: Exception) {
         0L
     }
+
+    fun removeByTs(ctx: Context, ts: Long) {
+        val f = historyFile(ctx)
+        if (!f.exists()) return
+        val entries = load(ctx).filter { it.ts != ts }
+        f.writeText(org.json.JSONArray(entries.map { e -> org.json.JSONObject().apply { put("ts", e.ts); put("text", e.text); put("provider", e.provider); if (e.lang != null) put("lang", e.lang) } }).toString())
+    }
 }
