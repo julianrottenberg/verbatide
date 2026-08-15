@@ -272,6 +272,7 @@ class MainActivity : AppCompatActivity() {
             Provider.OPENAI -> "api.openai.com · whisper-1 · gpt-4o-mini"
             Provider.GROQ -> "api.groq.com · ${defaults.sttModel} · ${defaults.chatModel}"
             Provider.OPENROUTER -> "openrouter.ai · ${defaults.sttModel} · ${defaults.chatModel}"
+            Provider.TOGETHER -> "api.together.ai · ${defaults.sttModel} · ${defaults.chatModel}"
             Provider.CUSTOM -> "Your own OpenAI-compatible endpoint"
         }
         val row = settingsRow(provider.displayName, subtitle, radio) {
@@ -505,6 +506,7 @@ class MainActivity : AppCompatActivity() {
         keyRowTitle.text = when (selectedProvider) {
             Provider.GROQ -> "Groq API key"
             Provider.OPENROUTER -> "OpenRouter API key"
+            Provider.TOGETHER -> "Together AI API key"
             Provider.CUSTOM -> "API key"
             else -> "OpenAI API key"
         }
@@ -547,6 +549,7 @@ class MainActivity : AppCompatActivity() {
         val hint = when (provider) {
             Provider.GROQ -> "gsk_..."
             Provider.OPENROUTER -> "sk-or-..."
+            Provider.TOGETHER -> "tgp_..."
             else -> "sk-..."
         }
         val outer = this
