@@ -20,6 +20,9 @@ enum class Provider(
     GROQ("Groq"),
     OPENROUTER("OpenRouter"),
     TOGETHER("Together AI"),
+    VENICE("Venice AI"),
+    MISTRAL("Mistral"),
+    NANOGPT("NanoGPT"),
     FAL("fal.ai", supportsStt = true, supportsChat = false),
     CUSTOM("Custom"),
 }
@@ -92,6 +95,27 @@ object ProviderConfig {
         chatModel = "meta-llama/Llama-3.3-70B-Instruct-Turbo",
     )
 
+    private val VENICE_DEFAULTS = Defaults(
+        sttUrl = "https://api.venice.ai/api/v1/audio/transcriptions",
+        sttModel = "whisper-large-v3",
+        chatUrl = "https://api.venice.ai/api/v1/chat/completions",
+        chatModel = "venice-uncensored",
+    )
+
+    private val MISTRAL_DEFAULTS = Defaults(
+        sttUrl = "https://api.mistral.ai/v1/audio/transcriptions",
+        sttModel = "voxtral-mini-latest",
+        chatUrl = "https://api.mistral.ai/v1/chat/completions",
+        chatModel = "mistral-small-latest",
+    )
+
+    private val NANOGPT_DEFAULTS = Defaults(
+        sttUrl = "https://api.nano-gpt.com/api/v1/audio/transcriptions",
+        sttModel = "Whisper-Large-V3",
+        chatUrl = "https://api.nano-gpt.com/api/v1/chat/completions",
+        chatModel = "openai/gpt-4o-mini",
+    )
+
     /**
      * fal.ai Wizper (whisper v3 large) — STT only, queue-based API at
      * https://queue.fal.run/fal-ai/wizper (audio_url + polling). Handled by
@@ -108,6 +132,9 @@ object ProviderConfig {
         "groq" -> Provider.GROQ
         "openrouter", "open_router" -> Provider.OPENROUTER
         "together", "together_ai", "togetherai" -> Provider.TOGETHER
+        "venice", "venice_ai", "veniceai" -> Provider.VENICE
+        "mistral", "voxtral" -> Provider.MISTRAL
+        "nanogpt", "nano_gpt", "nano-gpt" -> Provider.NANOGPT
         "fal", "fal.ai", "fal_ai", "falai", "wizper" -> Provider.FAL
         "custom" -> Provider.CUSTOM
         else -> Provider.OPENAI
@@ -136,6 +163,9 @@ object ProviderConfig {
         Provider.GROQ -> GROQ_DEFAULTS
         Provider.OPENROUTER -> OPENROUTER_DEFAULTS
         Provider.TOGETHER -> TOGETHER_DEFAULTS
+        Provider.VENICE -> VENICE_DEFAULTS
+        Provider.MISTRAL -> MISTRAL_DEFAULTS
+        Provider.NANOGPT -> NANOGPT_DEFAULTS
         Provider.FAL -> FAL_DEFAULTS
         Provider.CUSTOM -> OPENAI_DEFAULTS // fallback shape; custom values override
     }

@@ -322,6 +322,9 @@ class MainActivity : AppCompatActivity() {
             Provider.GROQ -> "api.groq.com · ${defaults.sttModel} · ${defaults.chatModel}"
             Provider.OPENROUTER -> "openrouter.ai · ${defaults.sttModel} · ${defaults.chatModel}"
             Provider.TOGETHER -> "api.together.ai · ${defaults.sttModel} · ${defaults.chatModel}"
+            Provider.VENICE -> "api.venice.ai · ${defaults.sttModel} · ${defaults.chatModel}"
+            Provider.MISTRAL -> "api.mistral.ai · voxtral-mini-latest · mistral-small"
+            Provider.NANOGPT -> "api.nano-gpt.com · Whisper-Large-V3 · gpt-4o-mini"
             Provider.FAL -> "queue.fal.run · wizper (STT only)"
             Provider.CUSTOM -> if (isStt) "Your own STT endpoint" else "Your own chat endpoint"
         }

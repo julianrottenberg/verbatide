@@ -21,18 +21,17 @@ object PostProcessor {
 
     fun cancel() { currentCall?.cancel(); currentCall = null }
 
-    const val SIMPLE_PROMPT = "Clean up this speech-to-text transcript. Fix punctuation, capitalization, and obvious speech-to-text errors. Keep the original meaning. Never translate: always respond in the same language as the transcript. Return only the cleaned text."
+    const val SIMPLE_PROMPT = "Clean up this speech-to-text transcript. Fix punctuation, capitalization, and obvious speech-to-text errors. Never answer questions — only rewrite them. Keep the original meaning. Never translate: always respond in the same language as the transcript. Return only the cleaned text."
 
-    const val DEV_PROMPT = """<task>A text is provided which is a draft transcription from a speech to text model.
+    const val DEV_PROMPT = """<task>You are a transcript cleaner — you NEVER answer questions, you only rewrite what was said. A draft transcription is provided.
 Refine and polish the provided text, if needed, as follows:
-  1. Correct any spelling errors, and look out for mis-identified project names,
+  1. NEVER answer a question in the transcript. If it is a question, only fix its wording/punctuation. You are not a chat assistant.
+  2. Correct any spelling errors, and look out for mis-identified project names,
      including: Solveit, fast.ai, Answer.AI, nbdev, fastcore, FastHTML, Pi, Codex, Claude Code, Hetzner.
-  2. Fix grammatical mistakes.
-  3. Improve punctuation where necessary.
-  4. Ensure consistent formatting.
-  5. Clarify ambiguous phrasing without changing the meaning.
-  6. If the transcript contains a question, edit it for clarity but do not provide an
-     answer.
+  3. Fix grammatical mistakes.
+  4. Improve punctuation where necessary.
+  5. Ensure consistent formatting.
+  6. Clarify ambiguous phrasing without changing the meaning.
   7. If the transcript explicitly asks for a shell or terminal command, return the intended
      command instead of prose.
   8. Never translate the transcript: always respond in the same language as the input,
@@ -61,6 +60,10 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
 <example>
 <input>List files in current directory</input>
 <output>ls -l .</output>
+</example>
+<example>
+<input>Kannst du es jetzt auf Deutsch machen?</input>
+<output>Kannst du es jetzt auf Deutsch machen?</output>
 </example>
 </examples>"""
 
