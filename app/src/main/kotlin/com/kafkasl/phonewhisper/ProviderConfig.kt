@@ -37,6 +37,8 @@ object ProviderConfig {
     private const val KEY_CHAT_PROVIDER = "chat_provider"
     private const val KEY_CUSTOM_STT_URL = "custom_stt_base_url"
     private const val KEY_CUSTOM_STT_MODEL = "custom_stt_model"
+    private const val KEY_STT_MODEL_OVERRIDE = "stt_model_override"
+    private const val KEY_CHAT_MODEL_OVERRIDE = "chat_model_override"
     private const val KEY_CUSTOM_CHAT_URL = "custom_chat_base_url"
     private const val KEY_CUSTOM_CHAT_MODEL = "custom_chat_model"
 
@@ -92,7 +94,7 @@ object ProviderConfig {
         sttUrl = "https://api.together.ai/v1/audio/transcriptions",
         sttModel = "openai/whisper-large-v3",
         chatUrl = "https://api.together.ai/v1/chat/completions",
-        chatModel = "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        chatModel = "openai/gpt-oss-20b",
     )
 
     private val VENICE_DEFAULTS = Defaults(
@@ -186,6 +188,8 @@ object ProviderConfig {
     fun sttModel(prefs: SharedPreferences): String {
         val p = selectedStt(prefs)
         if (p == Provider.FAL) return FAL_DEFAULTS.sttModel
+        // Per-STT override set via the "STT model" row — persists across providers
+        prefs.getString(KEY_STT_MODEL_OVERRIDE, null)?.trim().orEmpty().let { if (it.isNotBlank()) return it }
         if (p == Provider.CUSTOM) {
             val custom = prefs.getString(KEY_CUSTOM_STT_MODEL, null)?.trim().orEmpty()
             if (custom.isNotBlank()) return custom
@@ -204,6 +208,8 @@ object ProviderConfig {
 
     fun chatModel(prefs: SharedPreferences): String {
         val p = selectedChat(prefs)
+        // Per-chat override set via the "Chat model" row — persists across providers
+        prefs.getString(KEY_CHAT_MODEL_OVERRIDE, null)?.trim().orEmpty().let { if (it.isNotBlank()) return it }
         if (p == Provider.CUSTOM) {
             val custom = prefs.getString(KEY_CUSTOM_CHAT_MODEL, null)?.trim().orEmpty()
             if (custom.isNotBlank()) return custom
@@ -231,6 +237,16 @@ object ProviderConfig {
 
     fun customChatUrl(prefs: SharedPreferences): String =
         prefs.getString(KEY_CUSTOM_CHAT_URL, "") ?: ""
+
+    fun saveSttModelOverride(prefs: SharedPreferences, value: String) {
+        if (value.isBlank()) prefs.edit().remove(KEY_STT_MODEL_OVERRIDE).apply()
+        else prefs.edit().putString(KEY_STT_MODEL_OVERRIDE, value.trim()).apply()
+    }
+
+    fun saveChatModelOverride(prefs: SharedPreferences, value: String) {
+        if (value.isBlank()) prefs.edit().remove(KEY_CHAT_MODEL_OVERRIDE).apply()
+        else prefs.edit().putString(KEY_CHAT_MODEL_OVERRIDE, value.trim()).apply()
+    }
 
     fun customChatModel(prefs: SharedPreferences): String =
         prefs.getString(KEY_CUSTOM_CHAT_MODEL, "") ?: ""

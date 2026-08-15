@@ -400,11 +400,11 @@ class MainActivity : AppCompatActivity() {
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
                 val v = input.text.toString().trim()
-                if (v.isBlank()) ProviderConfig.saveCustom(prefs(), sttModel = "")
-                else ProviderConfig.saveCustom(prefs(), sttModel = v)
+                if (v.isBlank()) ProviderConfig.saveSttModelOverride(prefs(), "")
+                else ProviderConfig.saveSttModelOverride(prefs(), v)
                 refresh()
             }
-            .setNegativeButton("Clear (use default)") { _, _ -> ProviderConfig.saveCustom(prefs(), sttModel = ""); refresh() }
+            .setNegativeButton("Clear (use default)") { _, _ -> ProviderConfig.saveSttModelOverride(prefs(), ""); refresh() }
             .setNeutralButton("Cancel", null)
             .show()
     }
@@ -416,11 +416,11 @@ class MainActivity : AppCompatActivity() {
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
                 val v = input.text.toString().trim()
-                if (v.isBlank()) ProviderConfig.saveCustom(prefs(), chatModel = "")
-                else ProviderConfig.saveCustom(prefs(), chatModel = v)
+                if (v.isBlank()) ProviderConfig.saveChatModelOverride(prefs(), "")
+                else ProviderConfig.saveChatModelOverride(prefs(), v)
                 refresh()
             }
-            .setNegativeButton("Clear (use default)") { _, _ -> ProviderConfig.saveCustom(prefs(), chatModel = ""); refresh() }
+            .setNegativeButton("Clear (use default)") { _, _ -> ProviderConfig.saveChatModelOverride(prefs(), ""); refresh() }
             .setNeutralButton("Cancel", null)
             .show()
     }
