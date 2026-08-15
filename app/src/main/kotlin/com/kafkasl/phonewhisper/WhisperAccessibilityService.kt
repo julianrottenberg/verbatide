@@ -454,30 +454,46 @@ class WhisperAccessibilityService : AccessibilityService() {
             reset("Recording too long — try a shorter dictation")
             return
         }
-        val apiKey = SecurePrefs.getApiKey(this)
-        if (apiKey.isBlank()) { reset("Set API key in Phone Whisper app"); return }
 
         val p = prefs()
-        TranscriberClient.transcribe(
-            wavData = wav,
-            apiKey = apiKey,
-            sttUrl = ProviderConfig.sttUrl(p),
-            sttModel = ProviderConfig.sttModel(p),
-            language = prefs().getString("stt_language", "auto"),
-        ) { result ->
-            if (result.text != null && result.text.isNotBlank()) {
+        val selectedStt = ProviderConfig.selectedStt(p)
+        val sttLanguage = prefs().getString("stt_language", "auto")
+
+        val onResult: (String?, String?, String?) -> Unit = { text, language, error ->
+            if (!text.isNullOrBlank()) {
                 // Prefer the user-pinned language; fall back to Whisper's
                 // detected language so cleanup knows what NOT to translate.
                 val pinned = prefs().getString("stt_language", "auto") ?: "auto"
-                val hint = if (pinned != "auto") langName(pinned) else result.language
-                handleTranscriptionResult(result.text, hint)
+                val hint = if (pinned != "auto") langName(pinned) else language
+                handleTranscriptionResult(text, hint)
             } else {
                 handler.post {
-                    toast("Error: ${result.error ?: "empty transcript"}")
+                    toast("Error: ${error ?: "empty transcript"}")
                     state = State.IDLE
                     setBusy(false)
                     setAppearance(COLOR_IDLE)
                 }
+            }
+        }
+
+        when (selectedStt) {
+            Provider.FAL -> {
+                val apiKey = SecurePrefs.getSttApiKey(this)
+                if (apiKey.isBlank()) { reset("Set STT API key (fal.ai) in Phone Whisper app"); return }
+                FalTranscriber.transcribe(wav, apiKey, sttLanguage) { r ->
+                    onResult(r.text, r.language, r.error)
+                }
+            }
+            else -> {
+                val apiKey = SecurePrefs.getSttApiKey(this)
+                if (apiKey.isBlank()) { reset("Set STT API key in Phone Whisper app"); return }
+                TranscriberClient.transcribe(
+                    wavData = wav,
+                    apiKey = apiKey,
+                    sttUrl = ProviderConfig.sttUrl(p),
+                    sttModel = ProviderConfig.sttModel(p),
+                    language = sttLanguage,
+                ) { result -> onResult(result.text, result.language, result.error) }
             }
         }
     }
@@ -494,7 +510,7 @@ class WhisperAccessibilityService : AccessibilityService() {
         }
 
         val usePostProcessing = prefs().getBoolean("use_post_processing", false)
-        val apiKey = SecurePrefs.getApiKey(this)
+        val apiKey = SecurePrefs.getChatApiKey(this)
 
         if (usePostProcessing) {
             if (apiKey.isBlank()) {

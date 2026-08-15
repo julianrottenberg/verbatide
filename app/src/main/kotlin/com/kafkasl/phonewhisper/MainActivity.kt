@@ -36,6 +36,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var providerContainer: LinearLayout
     private lateinit var customProviderContainer: LinearLayout
     private lateinit var providerSummarySub: TextView
+    private lateinit var chatProviderContainer: LinearLayout
+    private lateinit var chatCustomContainer: LinearLayout
+    private lateinit var chatSummarySub: TextView
+    private lateinit var sttKeyRowTitle: TextView
+    private lateinit var sttKeyRowSub: TextView
+    private lateinit var chatKeyRowTitle: TextView
+    private lateinit var chatKeyRowSub: TextView
+    private lateinit var sttKeyRow: LinearLayout
+    private lateinit var chatKeyRow: LinearLayout
     private lateinit var customSttUrlSub: TextView
     private lateinit var customSttModelSub: TextView
     private lateinit var customChatUrlSub: TextView
@@ -58,7 +67,7 @@ class MainActivity : AppCompatActivity() {
 
     private val modelRows = mutableMapOf<String, ModelRowViews>()
     private val promptRows = mutableMapOf<String, PromptRowViews>()
-    private val providerRows = mutableMapOf<Provider, ProviderRowViews>()
+    private val providerRows = mutableMapOf<Pair<Provider, Boolean>, ProviderRowViews>() // (provider, isStt) -> views
 
     private data class ModelRowViews(
         val radio: MaterialRadioButton,
@@ -132,11 +141,11 @@ class MainActivity : AppCompatActivity() {
         languageRowSub = languageRow.findViewWithTag("subtitle")
         root.addView(languageRow)
 
-        // --- Provider (visible only when cloud) ---
+        // --- STT provider (visible only when cloud) ---
         providerContainer = vertical(0)
-        providerContainer.addView(sectionHeader("Cloud provider"))
-        for (provider in Provider.entries) {
-            providerContainer.addView(buildProviderRow(provider))
+        providerContainer.addView(sectionHeader("Transcription provider"))
+        for (provider in ProviderConfig.sttProviders) {
+            providerContainer.addView(buildProviderRow(provider, isStt = true))
         }
         // Inline summary row so collapsed state is still informative
         val providerSummaryRow = LinearLayout(this).apply {
@@ -151,9 +160,9 @@ class MainActivity : AppCompatActivity() {
         providerSummaryRow.addView(providerSummarySub)
         providerContainer.addView(providerSummaryRow)
 
-        // Custom provider details (visible only when provider == CUSTOM and cloud is on)
+        // Custom STT details (visible only when STT provider == CUSTOM and cloud is on)
         customProviderContainer = vertical(0)
-        customProviderContainer.addView(sectionHeader("Custom endpoints"))
+        customProviderContainer.addView(sectionHeader("Custom STT"))
         run {
             val row = settingsRow(providerCustomSttUrlTitle(), providerCustomSttUrlSubtitle()) { promptCustomSttEndpoint() }
             customSttUrlSub = row.findViewWithTag("subtitle")
@@ -164,17 +173,12 @@ class MainActivity : AppCompatActivity() {
             customSttModelSub = row.findViewWithTag("subtitle")
             customProviderContainer.addView(row)
         }
-        run {
-            val row = settingsRow(providerCustomChatUrlTitle(), providerCustomChatUrlSubtitle()) { promptCustomChatEndpoint() }
-            customChatUrlSub = row.findViewWithTag("subtitle")
-            customProviderContainer.addView(row)
-        }
-        run {
-            val row = settingsRow(providerCustomChatModelTitle(), providerCustomChatModelSubtitle()) { promptCustomChatModel() }
-            customChatModelSub = row.findViewWithTag("subtitle")
-            customProviderContainer.addView(row)
-        }
         providerContainer.addView(customProviderContainer)
+        // STT API key (cloud only)
+        sttKeyRow = settingsRow("STT API key", "Tap to set") { promptApiKey(isStt = true) }
+        sttKeyRowTitle = sttKeyRow.findViewWithTag("title")
+        sttKeyRowSub = sttKeyRow.findViewWithTag("subtitle")
+        providerContainer.addView(sttKeyRow)
         root.addView(providerContainer)
 
         // Local Models
@@ -217,6 +221,45 @@ class MainActivity : AppCompatActivity() {
         reasoningRowSub = reasoningRow.findViewWithTag("subtitle")
         root.addView(reasoningRow)
 
+        // --- Cleanup provider (visible when post-processing is on — split so
+        // STT and chat can be mixed, e.g. fal.ai for STT + Together for cleanup) ---
+        chatProviderContainer = vertical(0)
+        chatProviderContainer.addView(sectionHeader("Cleanup provider"))
+        for (provider in ProviderConfig.chatProviders) {
+            chatProviderContainer.addView(buildProviderRow(provider, isStt = false))
+        }
+        val chatSummaryRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(24), dp(4), dp(24), dp(8))
+        }
+        chatSummarySub = TextView(this).apply {
+            tag = "chat_summary"
+            textSize = 12f
+            setTextColor(attrColor(android.R.attr.textColorSecondary))
+        }
+        chatSummaryRow.addView(chatSummarySub)
+        chatProviderContainer.addView(chatSummaryRow)
+
+        chatCustomContainer = vertical(0)
+        chatCustomContainer.addView(sectionHeader("Custom cleanup"))
+        run {
+            val row = settingsRow(providerCustomChatUrlTitle(), providerCustomChatUrlSubtitle()) { promptCustomChatEndpoint() }
+            customChatUrlSub = row.findViewWithTag("subtitle")
+            chatCustomContainer.addView(row)
+        }
+        run {
+            val row = settingsRow(providerCustomChatModelTitle(), providerCustomChatModelSubtitle()) { promptCustomChatModel() }
+            customChatModelSub = row.findViewWithTag("subtitle")
+            chatCustomContainer.addView(row)
+        }
+        chatProviderContainer.addView(chatCustomContainer)
+
+        chatKeyRow = settingsRow("Cleanup API key", "Tap to set") { promptApiKey(isStt = false) }
+        chatKeyRowTitle = chatKeyRow.findViewWithTag("title")
+        chatKeyRowSub = chatKeyRow.findViewWithTag("subtitle")
+        chatProviderContainer.addView(chatKeyRow)
+        root.addView(chatProviderContainer)
+
         // --- Backup & restore ---
         root.addView(sectionHeader("Backup & restore"))
         root.addView(settingsRow("Export settings", "Save endpoints, prompts & preferences to a file") {
@@ -229,7 +272,8 @@ class MainActivity : AppCompatActivity() {
         // --- API Key ---
         root.addView(sectionHeader("API key"))
 
-        val keyRow = settingsRow("API key", "Tap to set") { promptApiKey() }
+        val keyRow = settingsRow("API key", "Tap to set") { promptApiKey(isStt = true) }
+        keyRow.visibility = View.GONE
         keyRowTitle = keyRow.findViewWithTag("title")
         keyRowSub = keyRow.findViewWithTag("subtitle")
         root.addView(keyRow)
@@ -262,7 +306,7 @@ class MainActivity : AppCompatActivity() {
     // Provider rows
     // -----------------------------------------------------------------------
 
-    private fun buildProviderRow(provider: Provider): View {
+    private fun buildProviderRow(provider: Provider, isStt: Boolean = true): View {
         val radio = MaterialRadioButton(this).apply {
             isClickable = false
             buttonTintList = ColorStateList.valueOf(attrColor(com.google.android.material.R.attr.colorPrimary))
@@ -273,25 +317,31 @@ class MainActivity : AppCompatActivity() {
             Provider.GROQ -> "api.groq.com · ${defaults.sttModel} · ${defaults.chatModel}"
             Provider.OPENROUTER -> "openrouter.ai · ${defaults.sttModel} · ${defaults.chatModel}"
             Provider.TOGETHER -> "api.together.ai · ${defaults.sttModel} · ${defaults.chatModel}"
-            Provider.CUSTOM -> "Your own OpenAI-compatible endpoint"
+            Provider.FAL -> "queue.fal.run · wizper (STT only)"
+            Provider.CUSTOM -> if (isStt) "Your own STT endpoint" else "Your own chat endpoint"
         }
         val row = settingsRow(provider.displayName, subtitle, radio) {
-            ProviderConfig.saveProvider(prefs(), provider)
+            if (isStt) ProviderConfig.saveSttProvider(prefs(), provider)
+            else ProviderConfig.saveChatProvider(prefs(), provider)
             refresh()
         }
-        // Retag so we can refresh selection state
+        // Retag so we can refresh selection state — key on (provider, side).
         val subtitleView = row.findViewWithTag<TextView>("subtitle")
-        providerRows[provider] = ProviderRowViews(radio, subtitleView)
-        refreshProviderRow(provider)
+        providerRows[provider to isStt] = ProviderRowViews(radio, subtitleView)
+        refreshProviderRow(provider, isStt)
         return row
     }
 
-    private fun refreshProviderRow(provider: Provider) {
-        val views = providerRows[provider] ?: return
-        views.radio.isChecked = ProviderConfig.selected(prefs()) == provider
+    private fun refreshProviderRow(provider: Provider, isStt: Boolean = true) {
+        val views = providerRows[provider to isStt] ?: return
+        views.radio.isChecked = if (isStt) ProviderConfig.selectedStt(prefs()) == provider
+                                else ProviderConfig.selectedChat(prefs()) == provider
     }
 
-    private fun refreshProviderRows() = Provider.entries.forEach { refreshProviderRow(it) }
+    private fun refreshProviderRows() {
+        ProviderConfig.sttProviders.forEach { refreshProviderRow(it, true) }
+        ProviderConfig.chatProviders.forEach { refreshProviderRow(it, false) }
+    }
 
     private fun providerCustomSttUrlTitle() = "STT endpoint"
     private fun providerCustomSttModelTitle() = "STT model"
@@ -474,27 +524,34 @@ class MainActivity : AppCompatActivity() {
         val acc = WhisperAccessibilityService.instance != null
         val useLocal = prefs().getBoolean("use_local", true)
         val usePostProcessing = prefs().getBoolean("use_post_processing", false)
-        val hasKey = SecurePrefs.hasApiKey(this)
+        val hasSttKey = SecurePrefs.hasSttApiKey(this)
+        val hasChatKey = SecurePrefs.hasChatApiKey(this)
         val hasModel = LocalTranscriber.availableModels(this).isNotEmpty()
-        val selectedProvider = ProviderConfig.selected(prefs())
-        val isCustomProvider = selectedProvider == Provider.CUSTOM
+        val selectedStt = ProviderConfig.selectedStt(prefs())
+        val selectedChat = ProviderConfig.selectedChat(prefs())
 
         audioRowSub.text = if (audio) "Granted" else "Tap to grant permission"
         accRowSub.text = if (acc) "Enabled" else "Tap to enable in settings"
 
-        // Visibility
+        // Visibility — STT and cleanup are independent so users can mix
+        // (e.g. fal.ai for transcription + Together AI for cleanup).
         modelContainer.visibility = if (useLocal) View.VISIBLE else View.GONE
         languageRow.visibility = if (useLocal) View.GONE else View.VISIBLE
         languageRowSub.text = currentLanguageLabel()
         providerContainer.visibility = if (!useLocal) View.VISIBLE else View.GONE
-        customProviderContainer.visibility = if (!useLocal && isCustomProvider) View.VISIBLE else View.GONE
+        customProviderContainer.visibility = if (!useLocal && selectedStt == Provider.CUSTOM) View.VISIBLE else View.GONE
+        chatProviderContainer.visibility = if (usePostProcessing) View.VISIBLE else View.GONE
+        chatCustomContainer.visibility = if (usePostProcessing && selectedChat == Provider.CUSTOM) View.VISIBLE else View.GONE
+        sttKeyRow.visibility = if (!useLocal) View.VISIBLE else View.GONE
+        chatKeyRow.visibility = if (usePostProcessing) View.VISIBLE else View.GONE
         promptContainer.visibility = if (usePostProcessing) View.VISIBLE else View.GONE
         promptRow.visibility = if (usePostProcessing) View.VISIBLE else View.GONE
         reasoningRow.visibility = if (usePostProcessing) View.VISIBLE else View.GONE
         reasoningRowSub.text = currentReasoningLabel()
 
         // Provider summary + radio states
-        providerSummarySub.text = ProviderConfig.summary(prefs())
+        providerSummarySub.text = ProviderConfig.sttSummary(prefs())
+        chatSummarySub.text = ProviderConfig.chatSummary(prefs())
         refreshProviderRows()
 
         customSttUrlSub.text = providerCustomSttUrlSubtitle()
@@ -502,11 +559,35 @@ class MainActivity : AppCompatActivity() {
         customChatUrlSub.text = providerCustomChatUrlSubtitle()
         customChatModelSub.text = providerCustomChatModelSubtitle()
 
-        // API key row — title reflects provider
+        // API key rows — per side
+        sttKeyRowTitle.text = when (selectedStt) {
+            Provider.GROQ -> "Groq STT key"
+            Provider.OPENROUTER -> "OpenRouter STT key"
+            Provider.TOGETHER -> "Together AI STT key"
+            Provider.FAL -> "fal.ai key"
+            Provider.CUSTOM -> "STT API key"
+            else -> "OpenAI STT key"
+        }
+        val sttKey = SecurePrefs.getSttApiKey(this)
+        sttKeyRowSub.text = if (sttKey.isBlank()) "Tap to set" else if (sttKey.length > 7) "${sttKey.take(3)}...${sttKey.takeLast(4)}" else "***"
+
+        chatKeyRowTitle.text = when (selectedChat) {
+            Provider.GROQ -> "Groq cleanup key"
+            Provider.OPENROUTER -> "OpenRouter cleanup key"
+            Provider.TOGETHER -> "Together AI cleanup key"
+            Provider.CUSTOM -> "Cleanup API key"
+            else -> "OpenAI cleanup key"
+        }
+        val chatKey = SecurePrefs.getChatApiKey(this)
+        chatKeyRowSub.text = if (chatKey.isBlank()) "Tap to set" else if (chatKey.length > 7) "${chatKey.take(3)}...${chatKey.takeLast(4)}" else "***"
+
+        // Legacy single key row — title reflects legacy provider (kept hidden)
+        val selectedProvider = ProviderConfig.selected(prefs())
         keyRowTitle.text = when (selectedProvider) {
             Provider.GROQ -> "Groq API key"
             Provider.OPENROUTER -> "OpenRouter API key"
             Provider.TOGETHER -> "Together AI API key"
+            Provider.FAL -> "fal.ai key"
             Provider.CUSTOM -> "API key"
             else -> "OpenAI API key"
         }
@@ -526,8 +607,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         val localReady = useLocal && hasModel
-        val cloudReady = !useLocal && hasKey
-        val postReady = !usePostProcessing || hasKey
+        val cloudReady = !useLocal && hasSttKey
+        val postReady = !usePostProcessing || hasChatKey
         val ready = audio && acc && (localReady || cloudReady) && postReady
 
         statusSubtitle.text = if (ready) "Ready — tap the overlay dot to dictate" else "Setup required"
@@ -544,12 +625,43 @@ class MainActivity : AppCompatActivity() {
     // Dialogs
     // -----------------------------------------------------------------------
 
-    private fun promptApiKey() {
+    // Single-key shim kept hidden; split keys are the real rows.
+    private fun promptApiKey(isStt: Boolean = true) { // isStt: false = chat STT/Cleanup
+        val provider = if (isStt) ProviderConfig.selectedStt(prefs()) else ProviderConfig.selectedChat(prefs())
+        val hint = when (provider) {
+            Provider.GROQ -> "gsk_..."
+            Provider.OPENROUTER -> "sk-or-..."
+            Provider.TOGETHER -> "tgp_..."
+            Provider.FAL -> "fal key — see https://fal.ai/dashboard/keys"
+            else -> "sk-..."
+        }
+        val outer = this
+        val input = EditText(this).apply {
+            this.hint = hint
+            setText(if (isStt) SecurePrefs.getSttApiKey(outer) else SecurePrefs.getChatApiKey(outer))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("${provider.displayName} ${if (isStt) "STT" else "cleanup"} key")
+            .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
+            .setPositiveButton("Save") { _, _ ->
+                if (isStt) SecurePrefs.putSttApiKey(outer, input.text.toString())
+                else SecurePrefs.putChatApiKey(outer, input.text.toString())
+                refresh()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    // Legacy single-key dialog (called nowhere after the split, but kept for
+    // backwards compat if the hidden row is ever tapped via search/toast).
+    private fun promptSingleApiKey() {
         val provider = ProviderConfig.selected(prefs())
         val hint = when (provider) {
             Provider.GROQ -> "gsk_..."
             Provider.OPENROUTER -> "sk-or-..."
             Provider.TOGETHER -> "tgp_..."
+            Provider.FAL -> "fal key"
             else -> "sk-..."
         }
         val outer = this
@@ -730,7 +842,11 @@ class MainActivity : AppCompatActivity() {
     private fun currentLanguageLabel(): String {
         val code = currentLanguageCode()
         val known = langOptions.firstOrNull { it.code == code }
-        return known?.label ?: "Custom ($code)"
+        return when {
+            code == "auto" -> "Auto-detect — some providers translate non-English; pin yours to be safe"
+            known != null -> known.label
+            else -> "Custom ($code)"
+        }
     }
 
     private fun promptLanguage() {

@@ -3,31 +3,42 @@ package com.kafkasl.phonewhisper
 import android.content.SharedPreferences
 
 /**
- * OpenAI-compatible provider configuration.
+ * Provider configuration with split STT / chat selection so users can mix,
+ * e.g. fal.ai for transcription and Together AI for cleanup.
  *
- * All providers speak the same HTTP contract (multipart /v1/audio/transcriptions
- * + JSON /v1/chat/completions with Bearer auth), so switching is just a
- * base-URL + model-name swap. "Custom" lets power users point at any
- * OpenAI-compatible endpoint (self-hosted, proxy, OpenRouter raw, etc.).
+ * fal.ai (Wizper) is STT-only and uses a queue-based API rather than
+ * OpenAI-compatible multipart — it gets its own client (FalTranscriber).
+ * All other providers speak the same HTTP contract (multipart
+ * /v1/audio/transcriptions + JSON /v1/chat/completions with Bearer auth).
  */
-enum class Provider(val displayName: String) {
+enum class Provider(
+    val displayName: String,
+    val supportsStt: Boolean = true,
+    val supportsChat: Boolean = true,
+) {
     OPENAI("OpenAI"),
     GROQ("Groq"),
     OPENROUTER("OpenRouter"),
     TOGETHER("Together AI"),
+    FAL("fal.ai", supportsStt = true, supportsChat = false),
     CUSTOM("Custom"),
 }
 
 object ProviderConfig {
 
     // -----------------------------------------------------------------------
-    // Stored keys
+    // Stored keys (split per purpose + legacy fallback)
     // -----------------------------------------------------------------------
-    private const val KEY_PROVIDER = "provider"
+    private const val KEY_PROVIDER = "provider" // legacy single key
+    private const val KEY_STT_PROVIDER = "stt_provider"
+    private const val KEY_CHAT_PROVIDER = "chat_provider"
     private const val KEY_CUSTOM_STT_URL = "custom_stt_base_url"
     private const val KEY_CUSTOM_STT_MODEL = "custom_stt_model"
     private const val KEY_CUSTOM_CHAT_URL = "custom_chat_base_url"
     private const val KEY_CUSTOM_CHAT_MODEL = "custom_chat_model"
+
+    val sttProviders: List<Provider> get() = Provider.entries.filter { it.supportsStt }
+    val chatProviders: List<Provider> get() = Provider.entries.filter { it.supportsChat }
 
     // -----------------------------------------------------------------------
     // Defaults per provider
@@ -79,22 +90,51 @@ object ProviderConfig {
         chatModel = "meta-llama/Llama-3.3-70B-Instruct-Turbo",
     )
 
+    /**
+     * fal.ai Wizper (whisper v3 large) — STT only, queue-based API at
+     * https://queue.fal.run/fal-ai/wizper (audio_url + polling). Handled by
+     * FalTranscriber rather than the generic multipart path.
+     */
+    private val FAL_DEFAULTS = Defaults(
+        sttUrl = "https://queue.fal.run/fal-ai/wizper",
+        sttModel = "wizper",
+        chatUrl = "",
+        chatModel = "",
+    )
+
     fun fromString(raw: String?): Provider = when (raw?.lowercase()?.trim()) {
         "groq" -> Provider.GROQ
         "openrouter", "open_router" -> Provider.OPENROUTER
         "together", "together_ai", "togetherai" -> Provider.TOGETHER
+        "fal", "fal.ai", "fal_ai", "falai", "wizper" -> Provider.FAL
         "custom" -> Provider.CUSTOM
         else -> Provider.OPENAI
     }
 
+    // Legacy single-provider shim.
     fun selected(prefs: SharedPreferences): Provider =
         fromString(prefs.getString(KEY_PROVIDER, null))
+
+    fun selectedStt(prefs: SharedPreferences): Provider {
+        val raw = prefs.getString(KEY_STT_PROVIDER, null)
+            ?: prefs.getString(KEY_PROVIDER, null)
+        return fromString(raw)
+    }
+
+    fun selectedChat(prefs: SharedPreferences): Provider {
+        val raw = prefs.getString(KEY_CHAT_PROVIDER, null)
+            ?: prefs.getString(KEY_PROVIDER, null)
+        val p = fromString(raw)
+        // fal.ai is STT-only; fall back to the legacy/openai default for chat.
+        return if (!p.supportsChat) Provider.OPENAI else p
+    }
 
     fun defaultsFor(provider: Provider): Defaults = when (provider) {
         Provider.OPENAI -> OPENAI_DEFAULTS
         Provider.GROQ -> GROQ_DEFAULTS
         Provider.OPENROUTER -> OPENROUTER_DEFAULTS
         Provider.TOGETHER -> TOGETHER_DEFAULTS
+        Provider.FAL -> FAL_DEFAULTS
         Provider.CUSTOM -> OPENAI_DEFAULTS // fallback shape; custom values override
     }
 
@@ -102,7 +142,8 @@ object ProviderConfig {
     // Resolved values (defaults + custom overrides)
     // -----------------------------------------------------------------------
     fun sttUrl(prefs: SharedPreferences): String {
-        val p = selected(prefs)
+        val p = selectedStt(prefs)
+        if (p == Provider.FAL) return FAL_DEFAULTS.sttUrl
         if (p == Provider.CUSTOM) {
             val custom = prefs.getString(KEY_CUSTOM_STT_URL, null)?.trim().orEmpty()
             if (custom.isNotBlank()) return normalizeUrl(custom)
@@ -111,7 +152,8 @@ object ProviderConfig {
     }
 
     fun sttModel(prefs: SharedPreferences): String {
-        val p = selected(prefs)
+        val p = selectedStt(prefs)
+        if (p == Provider.FAL) return FAL_DEFAULTS.sttModel
         if (p == Provider.CUSTOM) {
             val custom = prefs.getString(KEY_CUSTOM_STT_MODEL, null)?.trim().orEmpty()
             if (custom.isNotBlank()) return custom
@@ -120,7 +162,7 @@ object ProviderConfig {
     }
 
     fun chatUrl(prefs: SharedPreferences): String {
-        val p = selected(prefs)
+        val p = selectedChat(prefs)
         if (p == Provider.CUSTOM) {
             val custom = prefs.getString(KEY_CUSTOM_CHAT_URL, null)?.trim().orEmpty()
             if (custom.isNotBlank()) return normalizeUrl(custom)
@@ -129,7 +171,7 @@ object ProviderConfig {
     }
 
     fun chatModel(prefs: SharedPreferences): String {
-        val p = selected(prefs)
+        val p = selectedChat(prefs)
         if (p == Provider.CUSTOM) {
             val custom = prefs.getString(KEY_CUSTOM_CHAT_MODEL, null)?.trim().orEmpty()
             if (custom.isNotBlank()) return custom
@@ -139,6 +181,14 @@ object ProviderConfig {
 
     fun saveProvider(prefs: SharedPreferences, provider: Provider) {
         prefs.edit().putString(KEY_PROVIDER, provider.name.lowercase()).apply()
+    }
+
+    fun saveSttProvider(prefs: SharedPreferences, provider: Provider) {
+        prefs.edit().putString(KEY_STT_PROVIDER, provider.name.lowercase()).apply()
+    }
+
+    fun saveChatProvider(prefs: SharedPreferences, provider: Provider) {
+        prefs.edit().putString(KEY_CHAT_PROVIDER, provider.name.lowercase()).apply()
     }
 
     fun customSttUrl(prefs: SharedPreferences): String =
@@ -183,8 +233,6 @@ object ProviderConfig {
         val t = raw.trim()
         if (t.isBlank()) return null
         if (!isValidCustomUrl(t)) return null
-        // Disallow bare http except for loopback (self-hosted dev). Warn upstream
-        // by normalizing only; the caller decides whether to show a warning.
         return normalizeUrl(t)
     }
 
@@ -195,18 +243,49 @@ object ProviderConfig {
 
     private fun normalizeUrl(raw: String): String = raw.trim().trimEnd('/')
 
-    /** Human-readable summary for the Settings row subtitle. */
+    /** Human-readable summary. Shows split selection when STT != chat. */
     fun summary(prefs: SharedPreferences): String {
-        val p = selected(prefs)
+        val stt = selectedStt(prefs)
+        val chat = selectedChat(prefs)
+        if (stt == chat) {
+            val p = stt
+            val d = defaultsFor(p)
+            return when (p) {
+                Provider.CUSTOM -> {
+                    val su = sttUrl(prefs)
+                    val cu = chatUrl(prefs)
+                    if (su == cu) "Custom · $su" else "Custom · STT: ${shortHost(su)} · Chat: ${shortHost(cu)}"
+                }
+                Provider.FAL -> "fal.ai · wizper"
+                else -> "${p.displayName} · STT: ${d.sttModel} · Chat: ${d.chatModel}"
+            }
+        }
+        fun label(p: Provider, d: Defaults): String = when (p) {
+            Provider.CUSTOM -> shortHost(if (p == selectedStt(prefs)) sttUrl(prefs) else chatUrl(prefs))
+            Provider.FAL -> "wizper"
+            else -> d.sttModel.takeIf { p == stt } ?: d.chatModel
+        }
+        val sttD = defaultsFor(stt)
+        val chatD = defaultsFor(chat)
+        return "STT: ${stt.displayName} (${label(stt, sttD)}) · Cleanup: ${chat.displayName} (${label(chat, chatD)})"
+    }
+
+    fun sttSummary(prefs: SharedPreferences): String {
+        val p = selectedStt(prefs)
         val d = defaultsFor(p)
         return when (p) {
-            Provider.CUSTOM -> {
-                val stt = sttUrl(prefs)
-                val chat = chatUrl(prefs)
-                if (stt == chat) "Custom · $stt"
-                else "Custom · STT: ${shortHost(stt)} · Chat: ${shortHost(chat)}"
-            }
-            else -> "${p.displayName} · STT: ${d.sttModel} · Chat: ${d.chatModel}"
+            Provider.CUSTOM -> customSttUrl(prefs).ifBlank { d.sttUrl }.let { shortHost(it) + " · " + customSttModel(prefs).ifBlank { d.sttModel } }
+            Provider.FAL -> "fal.ai · wizper"
+            else -> "${p.displayName} · ${d.sttModel}"
+        }
+    }
+
+    fun chatSummary(prefs: SharedPreferences): String {
+        val p = selectedChat(prefs)
+        val d = defaultsFor(p)
+        return when (p) {
+            Provider.CUSTOM -> customChatUrl(prefs).ifBlank { d.chatUrl }.let { shortHost(it) + " · " + customChatModel(prefs).ifBlank { d.chatModel } }
+            else -> "${p.displayName} · ${d.chatModel}"
         }
     }
 

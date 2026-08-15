@@ -16,7 +16,7 @@ object SettingsBackup {
     const val BACKUP_VERSION = 1
 
     private val STRING_KEYS = listOf(
-        "provider",
+        "provider", "stt_provider", "chat_provider",
         "custom_stt_base_url",
         "custom_stt_model",
         "custom_chat_base_url",

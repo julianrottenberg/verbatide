@@ -10,12 +10,18 @@ import androidx.security.crypto.MasterKey
  * AndroidKeyStore. All other prefs stay in plain SharedPreferences so a
  * keystore failure doesn't brick the app — we fall back gracefully.
  *
+ * Two separate STT / chat keys so users can mix providers with different
+ * credentials (e.g. fal.ai for transcription + Together AI for cleanup).
+ * Legacy `api_key` is used as a fallback/migration source for both.
+ *
  * Migration: on first use we copy any existing api_key from the plain file.
  */
 object SecurePrefs {
 
     private const val PLAIN_NAME = "phonewhisper"
     const val KEY_API_KEY = "api_key"
+    const val KEY_STT_API_KEY = "stt_api_key"
+    const val KEY_CHAT_API_KEY = "chat_api_key"
 
     // Encrypted file name — keep it distinct from the plain one.
     private const val ENCRYPTED_NAME = "phonewhisper_secure"
@@ -72,29 +78,53 @@ object SecurePrefs {
         plain.edit().remove(KEY_API_KEY).apply()
     }
 
-    fun getApiKey(ctx: Context): String {
+    // Legacy single-key API — kept for tests and any external callers that
+    // assumed one key. Reads/writes the shared default key.
+    fun getApiKey(ctx: Context): String = getKey(ctx, KEY_API_KEY)
+
+    fun putApiKey(ctx: Context, value: String) = putKey(ctx, KEY_API_KEY, value)
+
+    fun hasApiKey(ctx: Context): Boolean = getApiKey(ctx).isNotBlank()
+
+    fun getKey(ctx: Context, key: String): String {
         val enc = encryptedPrefsOrNull(ctx)
-        if (enc != null && enc.contains(KEY_API_KEY)) {
-            return enc.getString(KEY_API_KEY, "") ?: ""
+        if (enc != null) {
+            // Per-purpose key present?
+            if (enc.contains(key)) return enc.getString(key, "") ?: ""
+            // Fall back to the legacy single key if the caller asked for a
+            // per-purpose key but only the legacy one exists (migration).
+            if ((key == KEY_STT_API_KEY || key == KEY_CHAT_API_KEY) && enc.contains(KEY_API_KEY)) {
+                return enc.getString(KEY_API_KEY, "") ?: ""
+            }
+            return enc.getString(key, "") ?: ""
         }
-        return plainPrefs(ctx).getString(KEY_API_KEY, "") ?: ""
+        // No encrypted store — fall back to plain prefs (same logic).
+        val plain = plainPrefs(ctx)
+        if (plain.contains(key)) return plain.getString(key, "") ?: ""
+        if ((key == KEY_STT_API_KEY || key == KEY_CHAT_API_KEY) && plain.contains(KEY_API_KEY)) {
+            return plain.getString(KEY_API_KEY, "") ?: ""
+        }
+        return plain.getString(key, "") ?: ""
     }
 
-    fun putApiKey(ctx: Context, value: String) {
+    fun putKey(ctx: Context, key: String, value: String) {
         val trimmed = value.trim()
         val enc = encryptedPrefsOrNull(ctx)
         if (enc != null) {
-            if (trimmed.isBlank()) enc.edit().remove(KEY_API_KEY).apply()
-            else enc.edit().putString(KEY_API_KEY, trimmed).apply()
-            // Ensure no stale plain copy lingers.
-            plainPrefs(ctx).edit().remove(KEY_API_KEY).apply()
+            if (trimmed.isBlank()) enc.edit().remove(key).apply()
+            else enc.edit().putString(key, trimmed).apply()
+            plainPrefs(ctx).edit().remove(key).apply()
         } else {
-            // Fallback: store in plain prefs if encrypted store is unavailable.
             val plain = plainPrefs(ctx)
-            if (trimmed.isBlank()) plain.edit().remove(KEY_API_KEY).apply()
-            else plain.edit().putString(KEY_API_KEY, trimmed).apply()
+            if (trimmed.isBlank()) plain.edit().remove(key).apply()
+            else plain.edit().putString(key, trimmed).apply()
         }
     }
 
-    fun hasApiKey(ctx: Context): Boolean = getApiKey(ctx).isNotBlank()
+    fun getSttApiKey(ctx: Context): String = getKey(ctx, KEY_STT_API_KEY)
+    fun putSttApiKey(ctx: Context, value: String) = putKey(ctx, KEY_STT_API_KEY, value)
+    fun getChatApiKey(ctx: Context): String = getKey(ctx, KEY_CHAT_API_KEY)
+    fun putChatApiKey(ctx: Context, value: String) = putKey(ctx, KEY_CHAT_API_KEY, value)
+    fun hasSttApiKey(ctx: Context): Boolean = getSttApiKey(ctx).isNotBlank()
+    fun hasChatApiKey(ctx: Context): Boolean = getChatApiKey(ctx).isNotBlank()
 }
