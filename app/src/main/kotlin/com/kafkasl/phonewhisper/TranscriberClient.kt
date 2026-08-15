@@ -64,11 +64,19 @@ object TranscriberClient {
                 if (!sttUrl.contains("together.ai")) b.addFormDataPart("response_format", "verbose_json") else b
             }
 
-        // Pinning the language prevents drift-to-English for non-English
-        // speech. `language: null` / 'auto' = provider decides — pass null
-        // only when the user picked auto-detect.
-        if (!language.isNullOrBlank() && language != "auto") {
-            bodyBuilder.addFormDataPart("language", language)
+        // Pinning the language prevents drift-to-English for non-English speech.
+        // Provider behavior for 'auto':
+        //   OpenAI/Groq/OpenRouter: omitted == auto (Groq turbo does short-clip VAD).
+        //   Together:      docs list 'auto' as explicit enum (default) and omitted -> en,
+        //                  so we must send 'auto' explicitly or it translates (even long clips).
+        //   Fal wizper:    send language=null JSON for auto (handled in FalTranscriber).
+        if (!language.isNullOrBlank()) {
+            if (language == "auto") {
+                if (sttUrl.contains("together.ai")) bodyBuilder.addFormDataPart("language", "auto")
+                // else: omit -> true auto for OpenAI/Groq/OpenRouter
+            } else {
+                bodyBuilder.addFormDataPart("language", language)
+            }
         }
 
         val body = bodyBuilder.build()
