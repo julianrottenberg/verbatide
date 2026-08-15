@@ -867,7 +867,7 @@ class MainActivity : AppCompatActivity() {
     // --- Reasoning effort ---
 
     private fun currentReasoning(): PostProcessor.Reasoning =
-        PostProcessor.Reasoning.fromKey(prefs().getString("reasoning_effort", "default"))
+        PostProcessor.Reasoning.fromKey(prefs().getString("reasoning_effort", "off"))
 
     private fun currentReasoningLabel(): String {
         val r = currentReasoning()

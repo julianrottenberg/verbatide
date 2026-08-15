@@ -212,23 +212,17 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
 
     private fun applyReasoning(bodyJson: JSONObject, chatUrl: String, reasoning: Reasoning) {
         if (reasoning == Reasoning.DEFAULT) return
+        if (reasoning == Reasoning.OFF) {
+            // Together + all hybrids per your screenshot (Qwen3.5/3.6, Gemma4, Cogito, DeepSeek V4 Pro, MiniMax M3):
+            // Hybrid disables via {"reasoning":{"enabled": false}}. Also send for non-Together so gpt-oss etc. stay off.
+            bodyJson.put("reasoning", JSONObject().apply { put("enabled", false) })
+            return
+        }
         val isOpenRouter = chatUrl.contains("openrouter.ai")
         if (isOpenRouter) {
-            // OpenRouter: reasoning: {"effort": "low"} or {"enabled": false}
-            val obj = JSONObject()
-            if (reasoning == Reasoning.OFF) {
-                obj.put("enabled", false)
-            } else {
-                obj.put("effort", reasoning.key)
-            }
-            bodyJson.put("reasoning", obj)
+            bodyJson.put("reasoning", JSONObject().apply { put("effort", reasoning.key) })
         } else {
-            // OpenAI / Groq / OpenAI-compatible: reasoning_effort: "low" (no "off" —
-            // unsupported fields are ignored by providers, and models that don't
-            // reason at all don't care either).
-            if (reasoning != Reasoning.OFF) {
-                bodyJson.put("reasoning_effort", reasoning.key)
-            }
+            bodyJson.put("reasoning_effort", reasoning.key)
         }
     }
 }

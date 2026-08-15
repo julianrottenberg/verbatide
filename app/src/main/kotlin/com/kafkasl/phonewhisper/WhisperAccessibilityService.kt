@@ -562,7 +562,7 @@ class WhisperAccessibilityService : AccessibilityService() {
                 apiKey = apiKey,
                 chatUrl = ProviderConfig.chatUrl(p2),
                 chatModel = ProviderConfig.chatModel(p2),
-                reasoning = PostProcessor.Reasoning.fromKey(prefs().getString("reasoning_effort", "default")),
+                reasoning = PostProcessor.Reasoning.fromKey(prefs().getString("reasoning_effort", "off")),
                 languageHint = languageHint,
             ) { result ->
                 handler.post {

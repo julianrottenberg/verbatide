@@ -94,7 +94,7 @@ object ProviderConfig {
         sttUrl = "https://api.together.ai/v1/audio/transcriptions",
         sttModel = "openai/whisper-large-v3",
         chatUrl = "https://api.together.ai/v1/chat/completions",
-        chatModel = "openai/gpt-oss-20b",
+        chatModel = "Qwen/Qwen3.5-9B",
     )
 
     private val VENICE_DEFAULTS = Defaults(
