@@ -25,6 +25,18 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".HistoryActivity"
+            android:exported="false"
+            android:label="History"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
+            android:name=".DictionaryActivity"
+            android:exported="false"
+            android:label="Dictionary"
+            android:parentActivityName=".MainActivity" />
+
         <service
             android:name=".WhisperAccessibilityService"
             android:exported="false"
