@@ -127,9 +127,10 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
         chatUrl: String = "https://api.openai.com/v1/chat/completions",
         chatModel: String = "gpt-4o-mini",
         reasoning: Reasoning = Reasoning.DEFAULT,
+        languageHint: String? = null,
         callback: (Result) -> Unit,
     ) {
-        val safePrompt = sanitizedPrompt(prompt)
+        val safePrompt = withLanguageGuard(sanitizedPrompt(prompt), languageHint)
         val safeText = sanitizedText(text)
         val messages = JSONArray().apply {
             put(JSONObject().apply {
@@ -173,6 +174,25 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
                 callback(if (capped != null) Result(capped, null) else parsed)
             }
         })
+    }
+
+    /**
+     * Appends a same-language rule to the cleanup system prompt unless the
+     * prompt itself already mentions translation (then the user is clearly
+     * driving language behaviour intentionally and we stay out of the way).
+     *
+     * This is enforced at request time (not only in the default prompt text)
+     * because users have prompts saved in prefs that predate the rule.
+     */
+    fun withLanguageGuard(prompt: String, languageHint: String?): String {
+        if (prompt.contains("translat", ignoreCase = true)) return prompt
+        return if (!languageHint.isNullOrBlank()) {
+            prompt + "\n\nIMPORTANT: The transcript is in $languageHint. Clean it up in " +
+                "$languageHint — never translate it into another language."
+        } else {
+            prompt + "\n\nIMPORTANT: Never translate the transcript. Always respond in the " +
+                "same language as the transcript."
+        }
     }
 
     private fun applyReasoning(bodyJson: JSONObject, chatUrl: String, reasoning: Reasoning) {

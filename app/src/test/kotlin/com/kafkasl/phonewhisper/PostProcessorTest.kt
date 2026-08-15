@@ -75,4 +75,20 @@ class PostProcessorTest {
                 result.error?.contains("must begin with '{'") == true
         )
     }
+
+    @Test fun `language guard appended when prompt lacks translation intent`() {
+        val out = PostProcessor.withLanguageGuard("Fix punctuation.", "German")
+        assertTrue(out.contains("German"))
+        assertTrue(out.contains("never translate", ignoreCase = true))
+    }
+
+    @Test fun `language guard respects prompts that mention translation`() {
+        val p = "Translate this to English."
+        assertEquals(p, PostProcessor.withLanguageGuard(p, "German"))
+    }
+
+    @Test fun `language guard generic when no hint`() {
+        val out = PostProcessor.withLanguageGuard("Fix punctuation.", null)
+        assertTrue(out.contains("same language", ignoreCase = true))
+    }
 }

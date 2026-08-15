@@ -7,7 +7,7 @@ import org.json.JSONObject
 import java.io.IOException
 
 object TranscriberClient {
-    data class Result(val text: String?, val error: String?)
+    data class Result(val text: String?, val error: String?, val language: String? = null)
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
@@ -18,7 +18,11 @@ object TranscriberClient {
     fun parseResponse(json: String): Result = try {
         val obj = JSONObject(json)
         when {
-            obj.has("text") -> Result(obj.getString("text"), null)
+            obj.has("text") -> Result(
+                obj.getString("text"),
+                null,
+                language = obj.optString("language", "").ifBlank { null },
+            )
             obj.has("error") -> Result(null, obj.getJSONObject("error").getString("message"))
             else -> Result(null, "Unknown response")
         }
@@ -45,6 +49,9 @@ object TranscriberClient {
             .setType(MultipartBody.FORM)
             .addFormDataPart("model", sttModel)
             .addFormDataPart("file", "audio.wav", wavData.toRequestBody("audio/wav".toMediaType()))
+            // verbose_json adds a `language` field so the cleanup step can be
+            // told which language to keep (prevents LLM cleanup translating).
+            .addFormDataPart("response_format", "verbose_json")
 
         // Pinning the language prevents Whisper's auto-translate-to-English
         // behaviour for non-English speech ("auto" = let the model detect).

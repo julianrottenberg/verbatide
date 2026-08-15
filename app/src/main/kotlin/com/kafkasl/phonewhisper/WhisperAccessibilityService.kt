@@ -47,11 +47,26 @@ class WhisperAccessibilityService : AccessibilityService() {
         private const val COLOR_BUSY = 0xDD6B6B6B.toInt()
         private const val COLOR_FEEDBACK_BG = 0xEE1C1C1E.toInt()
         private const val COLOR_RING = 0xFFE8EAED.toInt()
+
+        /** ISO-639-1 → display name, for the cleanup language guard. */
+        private val LANG_NAMES = mapOf(
+            "en" to "English", "de" to "German", "es" to "Spanish", "fr" to "French",
+            "it" to "Italian", "pt" to "Portuguese", "nl" to "Dutch", "pl" to "Polish",
+            "ru" to "Russian", "tr" to "Turkish", "ja" to "Japanese", "ko" to "Korean",
+            "zh" to "Chinese",
+        )
+
+        fun langName(code: String): String = LANG_NAMES[code.lowercase()] ?: code
     }
 
     private enum class State { IDLE, RECORDING, TRANSCRIBING }
 
     private var state = State.IDLE
+        set(value) {
+            field = value
+            // Keep the bubble visible while working; re-evaluate focus when idle.
+            handler.post { updateBubbleVisibility() }
+        }
     private var overlayView: FrameLayout? = null
     private var button: ImageView? = null
     private var spinner: ProgressBar? = null
@@ -77,11 +92,47 @@ class WhisperAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         instance = this
         showOverlay()
+        updateBubbleVisibility()
         // Try to load local model in background
         thread { initLocalModel() }
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event == null) return
+        when (event.eventType) {
+            AccessibilityEvent.TYPE_VIEW_FOCUSED,
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> updateBubbleVisibility()
+        }
+    }
+
+    /**
+     * Show the bubble only when an editable text field has focus (like Wispr
+     * Flow) — or while recording/transcribing, when it must stay visible no
+     * matter where focus moved. Otherwise hide it so it doesn't float over
+     * unrelated apps.
+     */
+    private fun updateBubbleVisibility() {
+        val overlay = overlayView ?: return
+        val editable = if (state == State.IDLE) hasFocusedEditableField() else true
+        val visible = state != State.IDLE || editable
+        val newVis = if (visible) View.VISIBLE else View.GONE
+        if (overlay.visibility != newVis) {
+            overlay.visibility = newVis
+            if (!visible) feedbackView?.visibility = View.GONE
+        }
+    }
+
+    private fun hasFocusedEditableField(): Boolean {
+        val node = try {
+            rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        } catch (e: Exception) {
+            null
+        }
+        val editable = node?.isEditable == true
+        node?.recycle()
+        return editable
+    }
     override fun onInterrupt() {}
 
     override fun onDestroy() {
@@ -415,7 +466,11 @@ class WhisperAccessibilityService : AccessibilityService() {
             language = prefs().getString("stt_language", "auto"),
         ) { result ->
             if (result.text != null && result.text.isNotBlank()) {
-                handleTranscriptionResult(result.text)
+                // Prefer the user-pinned language; fall back to Whisper's
+                // detected language so cleanup knows what NOT to translate.
+                val pinned = prefs().getString("stt_language", "auto") ?: "auto"
+                val hint = if (pinned != "auto") langName(pinned) else result.language
+                handleTranscriptionResult(result.text, hint)
             } else {
                 handler.post {
                     toast("Error: ${result.error ?: "empty transcript"}")
@@ -427,7 +482,7 @@ class WhisperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun handleTranscriptionResult(text: String?) {
+    private fun handleTranscriptionResult(text: String?, languageHint: String? = null) {
         if (text.isNullOrBlank()) {
             handler.post {
                 toast("No speech detected")
@@ -462,6 +517,7 @@ class WhisperAccessibilityService : AccessibilityService() {
                 chatUrl = ProviderConfig.chatUrl(p2),
                 chatModel = ProviderConfig.chatModel(p2),
                 reasoning = PostProcessor.Reasoning.fromKey(prefs().getString("reasoning_effort", "default")),
+                languageHint = languageHint,
             ) { result ->
                 handler.post {
                     if (result.text != null && result.text.isNotBlank()) {

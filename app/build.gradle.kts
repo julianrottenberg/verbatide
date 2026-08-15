@@ -11,8 +11,8 @@ android {
         applicationId = "com.kafkasl.phonewhisper"
         minSdk = 30
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.4.0"
+        versionCode = 7
+        versionName = "0.5.0"
 
         ndk { abiFilters += "arm64-v8a" }
     }
@@ -20,6 +20,20 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    signingConfigs {
+        // Committed debug keystore so every CI build signs with the SAME key.
+        // Without this, each CI run generates a fresh debug key and Android
+        // refuses in-place updates (signature mismatch). Debug certs are not
+        // security-sensitive; release signing (if ever added) uses secrets.
+        named("debug") {
+            storeFile = file("debug.p12")
+            storePassword = "android"
+            keyAlias = "phonewhisper"
+            keyPassword = "android"
+            storeType = "PKCS12"
+        }
     }
 
     @Suppress("DEPRECATION")

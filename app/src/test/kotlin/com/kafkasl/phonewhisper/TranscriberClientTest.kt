@@ -28,4 +28,15 @@ class TranscriberClientTest {
         assertNull(r.text)
         assertNotNull(r.error)
     }
+
+    @Test fun `parses verbose_json language field`() {
+        val r = TranscriberClient.parseResponse("""{"text": "Hallo Welt", "language": "german"}""")
+        assertEquals("Hallo Welt", r.text)
+        assertEquals("german", r.language)
+    }
+
+    @Test fun `language is null when absent`() {
+        val r = TranscriberClient.parseResponse("""{"text": "Hello"}""")
+        assertNull(r.language)
+    }
 }
