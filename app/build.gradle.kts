@@ -11,8 +11,8 @@ android {
         applicationId = "com.kafkasl.phonewhisper"
         minSdk = 30
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.1"
+        versionCode = 4
+        versionName = "0.3.2"
 
         ndk { abiFilters += "arm64-v8a" }
     }
@@ -29,6 +29,10 @@ android {
 }
 
 dependencies {
+    // sherpa-onnx Kotlin API wrapper is vendored under app/src/main/kotlin/com/k2fsa/sherpa/onnx/
+    // but the native libsherpa-onnx-jni.so ships via this AAR (fixes UnsatisfiedLinkError
+    // that crashed the accessibility service on startup).
+    implementation(files("libs/sherpa-onnx-1.13.5.aar"))
     implementation("androidx.security:security-crypto:1.1.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.core:core-ktx:1.13.1")
