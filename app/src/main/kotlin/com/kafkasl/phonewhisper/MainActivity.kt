@@ -66,6 +66,8 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
             uri?.let { readBackup(it) }
         }
+    private val historyLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { /* refresh on return */ }
+    private val dictionaryLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { /* refresh on return */ }
 
     private val modelRows = mutableMapOf<String, ModelRowViews>()
     private val promptRows = mutableMapOf<String, PromptRowViews>()
@@ -374,6 +376,12 @@ class MainActivity : AppCompatActivity() {
 
     // Prefilled defaults — let user override the model without switching to Custom.
     // sttModel(prefs) prefers custom_stt_model when set, otherwise the provider default (now voxtral-mini-2602 for Mistral).
+    private fun dictionarySummary(): String {
+        val n = DictionaryManager.load(this).size
+        val on = if (DictionaryManager.enabled(prefs())) "on" else "off"
+        return "$n entries · $on — tap to manage"
+    }
+
     private fun sttModelDisplay(): String {
         val cur = ProviderConfig.sttModel(prefs())
         val def = ProviderConfig.defaultsFor(ProviderConfig.selectedStt(prefs())).sttModel
@@ -1103,28 +1111,11 @@ class MainActivity : AppCompatActivity() {
             "$c entries · ~${kb} KB" // quick summary
         }
 
-        val browseRow = settingsRow("Browse history", subtitle()) {
-            val entries = HistoryManager.load(this)
-            if (entries.isEmpty()) {
-                Toast.makeText(this, "No transcriptions yet", Toast.LENGTH_SHORT).show()
-                return@settingsRow
-            }
-            val labels = entries.map { e ->
-                val d = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
-                d.format(java.util.Date(e.ts)) + " · " + e.text.take(48)
-            }.toTypedArray()
-            // Keep entries stable by index — copy to array.
-            val arr = entries.toTypedArray()
-            android.app.AlertDialog.Builder(this)
-                .setTitle("History — tap to copy")
-                .setItems(labels) { _, which ->
-                    val t = arr[which].text
-                    (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager)
-                        .setPrimaryClip(ClipData.newPlainText("phonewhisper", t))
-                    Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
-                }
-                .setNegativeButton("Close", null)
-                .show()
+        val browseRow = settingsRow("Browse history", "Open the full history screen — search, copy, delete") {
+            historyLauncher.launch(android.content.Intent(this, HistoryActivity::class.java))
+        }
+        val dictRow = settingsRow("Dictionary", dictionarySummary()) {
+            dictionaryLauncher.launch(android.content.Intent(this, DictionaryActivity::class.java))
         }
 
         val historyLimitRow = settingsRow(
@@ -1191,6 +1182,7 @@ class MainActivity : AppCompatActivity() {
 
         container.addView(enabledRow)
         container.addView(browseRow)
+        container.addView(dictRow)
         container.addView(historyLimitRow)
         container.addView(clearRow)
         return container
