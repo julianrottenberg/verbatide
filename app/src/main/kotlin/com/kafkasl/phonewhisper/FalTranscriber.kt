@@ -1,8 +1,8 @@
 package com.kafkasl.phonewhisper
 
-import android.util.Base64
 import android.util.Log
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -13,23 +13,25 @@ import kotlin.concurrent.thread
 /**
  * fal.ai Queue-based STT via Wizper (whisper v3 large).
  *
- * Sync:  POST https://fal.run/fal-ai/wizper           {audio_url, task, language, version}
- * Queue: POST https://queue.fal.run/fal-ai/wizper     -> {request_id, status_url, response_url}
- *        poll GET status_url -> {status: IN_QUEUE|IN_PROGRESS|COMPLETED|FAILED}
- *        GET response_url   -> {text, chunks, languages}
+ * Wizper rejects data: URIs (see: https://fal.ai/models/fal-ai/wizper?share=... ) —
+ * we must use fal Storage: initiate upload -> PUT bytes -> use file_url as audio_url.
  *
- * The local audio WAV is sent inline as a data URI (fal supports data: URIs
- * for file inputs; uploading separately isn't needed for dictation-sized clips).
- * Auth is `Authorization: Key <key>` (not Bearer).
+ * Queue: POST https://queue.fal.run/fal-ai/wizper     -> {request_id, status_url, response_url}
+ *        poll GET status_url -> {status: ...}
+ *        GET response_url   -> {text, chunks, languages}
  *
  * Model card: https://fal.ai/models/fal-ai/wizper/api — defaults to
  * language="en" and task="transcribe"; to support auto-detect we must
  * send language: null explicitly so wizper does not force English output.
+ * Auth is `Authorization: Key <key>` (not Bearer).
  */
 object FalTranscriber {
 
     private const val TAG = "FalTranscriber"
     private const val SUBMIT_URL = "https://queue.fal.run/fal-ai/wizper"
+    // fal's JS SDK posts to https://rest.fal.ai/storage/upload/initiate
+    // with {content_type, file_name}. This is the documented storage API.
+    private const val STORAGE_INIT_URL = "https://rest.fal.ai/storage/upload/initiate?storage_type=fal-cdn-v3"
     private const val MAX_POLL_MS = 90_000L
     private const val POLL_INTERVAL_MS = 1_000L
 
@@ -47,20 +49,25 @@ object FalTranscriber {
         language: String? = null,
         callback: (Result) -> Unit,
     ) {
+        cancelled = false
         thread {
             try {
                 if (wavData.size > TranscriberClient.MAX_WAV_BYTES) {
                     callback(Result(null, "Audio too large (${wavData.size / (1024 * 1024)} MB > 25 MB)"))
                     return@thread
                 }
-                val dataUri = "data:audio/wav;base64,${Base64.encodeToString(wavData, Base64.NO_WRAP)}"
+                // Upload to fal Storage first — wizper rejects data: URIs
+                // (https://fal.ai/models/fal-ai/wizper reports "Unsupported data URL").
+                val fileUrl = uploadToFalStorage(apiKey, wavData)
+                    ?: return@thread // error already reported via callback
+
                 val lang = language?.trim()?.takeIf { it.isNotBlank() && it.lowercase() != "auto" }?.lowercase()
                 // language = null means auto-detect for wizper; "en" default
                 // would force English output. Send null explicitly for auto.
                 val languageJsonValue: Any = if (lang != null) lang else JSONObject.NULL
 
                 val payload = JSONObject().apply {
-                    put("audio_url", dataUri)
+                    put("audio_url", fileUrl)
                     put("task", "transcribe")
                     put("language", languageJsonValue)
                     put("version", "3")
@@ -113,6 +120,62 @@ object FalTranscriber {
                 callback(Result(null, e.message ?: "Unknown fal.ai error"))
             }
         }
+    }
+
+    /**
+     * fal Storage: POST /storage/upload/initiate -> {upload_url, file_url}, then PUT wav bytes.
+     * Returns the file_url to use as audio_url, or null after reporting an error via callback.
+     */
+    @Volatile
+    var cancelled = false
+    fun cancel() { cancelled = true }
+
+    private fun uploadToFalStorage(apiKey: String, wavData: ByteArray): String? {
+        val initBody = JSONObject().apply {
+            put("content_type", "audio/wav")
+            put("file_name", "phonewhisper-${System.currentTimeMillis()}.wav")
+        }.toString().toRequestBody("application/json".toMediaType())
+
+        val initReq = Request.Builder()
+            .url(STORAGE_INIT_URL)
+            .header("Authorization", "Key $apiKey")
+            .post(initBody)
+            .build()
+
+        val (uploadUrl, fileUrl) = try {
+            client.newCall(initReq).execute().use { r ->
+                val body = r.body?.string() ?: ""
+                if (!r.isSuccessful) {
+                    Log.e(TAG, "storage initiate ${r.code}: $body")
+                    return null
+                }
+                val obj = JSONObject(body)
+                Pair(obj.getString("upload_url"), obj.getString("file_url"))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "storage initiate failed", e)
+            return null
+        }
+
+        // PUT the bytes to the signed URL
+        val putReq = Request.Builder()
+            .url(uploadUrl)
+            .put(wavData.toRequestBody("audio/wav".toMediaType()))
+            .build()
+        // Don't add Authorization to the signed URL.
+        try {
+            client.newCall(putReq).execute().use { r ->
+                if (!r.isSuccessful) {
+                    val body = r.body?.string()?.take(500) ?: ""
+                    Log.e(TAG, "storage PUT ${r.code}: $body")
+                    return null
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "storage PUT failed", e)
+            return null
+        }
+        return fileUrl
     }
 
     private fun pollAndFetch(

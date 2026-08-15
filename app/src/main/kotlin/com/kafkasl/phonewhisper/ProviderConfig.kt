@@ -84,6 +84,8 @@ object ProviderConfig {
      * STT uses whisper-large-v3; chat defaults to Llama 3.3 70B Turbo.
      */
     private val TOGETHER_DEFAULTS = Defaults(
+        // Together supports the same Whisper transcription contract on
+        // /v1/audio/transcriptions (translate lives on /v1/audio/translations).
         sttUrl = "https://api.together.ai/v1/audio/transcriptions",
         sttModel = "openai/whisper-large-v3",
         chatUrl = "https://api.together.ai/v1/chat/completions",

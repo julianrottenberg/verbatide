@@ -16,6 +16,11 @@ object PostProcessor {
         .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
+    @Volatile
+    var currentCall: Call? = null
+
+    fun cancel() { currentCall?.cancel(); currentCall = null }
+
     const val SIMPLE_PROMPT = "Clean up this speech-to-text transcript. Fix punctuation, capitalization, and obvious speech-to-text errors. Keep the original meaning. Never translate: always respond in the same language as the transcript. Return only the cleaned text."
 
     const val DEV_PROMPT = """<task>A text is provided which is a draft transcription from a speech to text model.
@@ -158,12 +163,16 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
             .post(body)
             .build()
 
-        client.newCall(request).enqueue(object : Callback {
+        val call = client.newCall(request)
+        currentCall = call
+        call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
+                currentCall = null
                 callback(Result(null, e.message))
             }
 
             override fun onResponse(call: Call, response: Response) {
+                currentCall = null
                 val responseBody = response.body?.string() ?: ""
                 if (!response.isSuccessful && responseBody.isBlank()) {
                     callback(Result(null, "HTTP ${response.code}"))

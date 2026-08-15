@@ -357,7 +357,7 @@ class WhisperAccessibilityService : AccessibilityService() {
         when (state) {
             State.IDLE -> startRecording()
             State.RECORDING -> stopAndTranscribe()
-            State.TRANSCRIBING -> {}
+            State.TRANSCRIBING -> cancelTranscription()
         }
     }
 
@@ -390,6 +390,27 @@ class WhisperAccessibilityService : AccessibilityService() {
                 val n = audioRecord?.read(buf, 0, buf.size) ?: break
                 if (n > 0) pcmStream?.write(buf, 0, n)
             }
+        }
+    }
+
+    private fun cancelTranscription() {
+        Log.i(TAG, "Cancel requested")
+        TranscriberClient.cancel()
+        FalTranscriber.cancel()
+        PostProcessor.cancel()
+        // Also interrupt the pending timeout handler so it doesn't fire.
+        handler.removeCallbacks(cancelTimeout)
+        state = State.IDLE
+        setBusy(false)
+        setAppearance(COLOR_IDLE)
+        showFeedback("Cancelled", 1500)
+    }
+
+    private val cancelTimeout = Runnable {
+        if (state == State.TRANSCRIBING) {
+            Log.w(TAG, "Transcription timed out")
+            cancelTranscription()
+            toast("Request timed out")
         }
     }
 
@@ -476,24 +497,32 @@ class WhisperAccessibilityService : AccessibilityService() {
             }
         }
 
+        // Arm a hard timeout so the spinner can never spin forever (the
+        // user reported an endless TRANSCRIBING state with fal.ai).
+        handler.postDelayed(cancelTimeout, /* 75s */ 75_000L)
+
         when (selectedStt) {
             Provider.FAL -> {
                 val apiKey = SecurePrefs.getSttApiKey(this)
-                if (apiKey.isBlank()) { reset("Set STT API key (fal.ai) in Phone Whisper app"); return }
+                if (apiKey.isBlank()) { handler.removeCallbacks(cancelTimeout); reset("Set STT API key (fal.ai) in Phone Whisper app"); return }
                 FalTranscriber.transcribe(wav, apiKey, sttLanguage) { r ->
+                    handler.removeCallbacks(cancelTimeout)
                     onResult(r.text, r.language, r.error)
                 }
             }
             else -> {
                 val apiKey = SecurePrefs.getSttApiKey(this)
-                if (apiKey.isBlank()) { reset("Set STT API key in Phone Whisper app"); return }
+                if (apiKey.isBlank()) { handler.removeCallbacks(cancelTimeout); reset("Set STT API key in Phone Whisper app"); return }
                 TranscriberClient.transcribe(
                     wavData = wav,
                     apiKey = apiKey,
                     sttUrl = ProviderConfig.sttUrl(p),
                     sttModel = ProviderConfig.sttModel(p),
                     language = sttLanguage,
-                ) { result -> onResult(result.text, result.language, result.error) }
+                ) { result ->
+                    handler.removeCallbacks(cancelTimeout)
+                    onResult(result.text, result.language, result.error)
+                }
             }
         }
     }

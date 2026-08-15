@@ -15,6 +15,11 @@ object TranscriberClient {
         .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
+    @Volatile
+    var currentCall: Call? = null
+
+    fun cancel() { currentCall?.cancel(); currentCall = null }
+
     fun parseResponse(json: String): Result = try {
         val obj = JSONObject(json)
         when {
@@ -67,10 +72,19 @@ object TranscriberClient {
             .post(body)
             .build()
 
+        // Together: when `language` is known, always pass it (prevents STT
+        // translating to English). verbose_json is not supported there so
+        // only add it for providers that do (openai/groq/openrouter).
         // OkHttp validates the URL scheme; caller should pre-validate custom URLs.
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) = callback(Result(null, e.message))
+        val call = client.newCall(request)
+        currentCall = call
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                currentCall = null
+                callback(Result(null, e.message))
+            }
             override fun onResponse(call: Call, response: Response) {
+                currentCall = null
                 val body = response.body?.string() ?: ""
                 if (!response.isSuccessful && body.isBlank()) {
                     callback(Result(null, "HTTP ${response.code}"))

@@ -269,14 +269,17 @@ class MainActivity : AppCompatActivity() {
             importLauncher.launch(arrayOf("application/json", "text/*", "application/octet-stream"))
         })
 
-        // --- API Key ---
-        root.addView(sectionHeader("API key"))
-
-        val keyRow = settingsRow("API key", "Tap to set") { promptApiKey(isStt = true) }
-        keyRow.visibility = View.GONE
-        keyRowTitle = keyRow.findViewWithTag("title")
-        keyRowSub = keyRow.findViewWithTag("subtitle")
-        root.addView(keyRow)
+        // Legacy single "API key" section removed — keys live inside their
+        // respective Transcription/Cleanup provider groups since v0.6.0.
+        // Keep the lateinit backing fields wired for backwards-compat refresh()
+        // so we don't crash on older prefs, but leave the row off-screen.
+        run {
+            val keyRow = settingsRow("API key", "Tap to set") { promptApiKey(isStt = true) }
+            keyRow.visibility = View.GONE
+            keyRowTitle = keyRow.findViewWithTag("title")
+            keyRowSub = keyRow.findViewWithTag("subtitle")
+            // Not added to root — intentionally hidden.
+        }
 
         setContentView(
             ScrollView(this).apply {
