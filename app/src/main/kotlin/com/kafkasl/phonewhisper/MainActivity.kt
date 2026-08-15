@@ -176,6 +176,12 @@ class MainActivity : AppCompatActivity() {
             customProviderContainer.addView(row)
         }
         providerContainer.addView(customProviderContainer)
+        // Model override — prefilled with the provider default (now voxtral-mini-2602 for Mistral), user can change it
+        run {
+            val row = settingsRow("STT model", sttModelDisplay()) { promptSttModelOverride() }
+            row.tag = "sttModelOverrideRow"
+            providerContainer.addView(row)
+        }
         // STT API key (cloud only)
         sttKeyRow = settingsRow("STT API key", "Tap to set") { promptApiKey(isStt = true) }
         sttKeyRowTitle = sttKeyRow.findViewWithTag("title")
@@ -255,6 +261,11 @@ class MainActivity : AppCompatActivity() {
             chatCustomContainer.addView(row)
         }
         chatProviderContainer.addView(chatCustomContainer)
+        run {
+            val row = settingsRow("Chat model", chatModelDisplay()) { promptChatModelOverride() }
+            row.tag = "chatModelOverrideRow"
+            chatProviderContainer.addView(row)
+        }
 
         chatKeyRow = settingsRow("Cleanup API key", "Tap to set") { promptApiKey(isStt = false) }
         chatKeyRowTitle = chatKeyRow.findViewWithTag("title")
@@ -359,6 +370,51 @@ class MainActivity : AppCompatActivity() {
     private fun providerCustomSttUrlSubtitle(): String {
         val v = ProviderConfig.customSttUrl(prefs())
         return if (v.isBlank()) "Tap to set (e.g. https://api.example.com/v1/audio/transcriptions)" else v
+    }
+
+    // Prefilled defaults — let user override the model without switching to Custom.
+    // sttModel(prefs) prefers custom_stt_model when set, otherwise the provider default (now voxtral-mini-2602 for Mistral).
+    private fun sttModelDisplay(): String {
+        val cur = ProviderConfig.sttModel(prefs())
+        val def = ProviderConfig.defaultsFor(ProviderConfig.selectedStt(prefs())).sttModel
+        return if (cur == def) "Default ($def) — tap to change" else "$cur — tap to change (default $def)"
+    }
+    private fun chatModelDisplay(): String {
+        val cur = ProviderConfig.chatModel(prefs())
+        val def = ProviderConfig.defaultsFor(ProviderConfig.selectedChat(prefs())).chatModel
+        return if (cur == def) "Default ($def) — tap to change" else "$cur — tap to change (default $def)"
+    }
+    private fun promptSttModelOverride() {
+        val cur = ProviderConfig.sttModel(prefs())
+        val input = EditText(this).apply { setText(cur); hint = "e.g. voxtral-mini-2602" }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("STT model (override)")
+            .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
+            .setPositiveButton("Save") { _, _ ->
+                val v = input.text.toString().trim()
+                if (v.isBlank()) ProviderConfig.saveCustom(prefs(), sttModel = "")
+                else ProviderConfig.saveCustom(prefs(), sttModel = v)
+                refresh()
+            }
+            .setNegativeButton("Clear (use default)") { _, _ -> ProviderConfig.saveCustom(prefs(), sttModel = ""); refresh() }
+            .setNeutralButton("Cancel", null)
+            .show()
+    }
+    private fun promptChatModelOverride() {
+        val cur = ProviderConfig.chatModel(prefs())
+        val input = EditText(this).apply { setText(cur); hint = "e.g. mistral-small-latest" }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Chat model (override)")
+            .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
+            .setPositiveButton("Save") { _, _ ->
+                val v = input.text.toString().trim()
+                if (v.isBlank()) ProviderConfig.saveCustom(prefs(), chatModel = "")
+                else ProviderConfig.saveCustom(prefs(), chatModel = v)
+                refresh()
+            }
+            .setNegativeButton("Clear (use default)") { _, _ -> ProviderConfig.saveCustom(prefs(), chatModel = ""); refresh() }
+            .setNeutralButton("Cancel", null)
+            .show()
     }
 
     private fun providerCustomSttModelSubtitle(): String {
@@ -566,6 +622,9 @@ class MainActivity : AppCompatActivity() {
         customSttModelSub.text = providerCustomSttModelSubtitle()
         customChatUrlSub.text = providerCustomChatUrlSubtitle()
         customChatModelSub.text = providerCustomChatModelSubtitle()
+        // keep override rows in sync when provider changes
+        (findViewById<View>(android.R.id.content)?.findViewWithTag<LinearLayout>("sttModelOverrideRow")?.findViewWithTag<TextView>("subtitle"))?.let { it.text = sttModelDisplay() }
+        (findViewById<View>(android.R.id.content)?.findViewWithTag<LinearLayout>("chatModelOverrideRow")?.findViewWithTag<TextView>("subtitle"))?.let { it.text = chatModelDisplay() }
 
         // API key rows — per side
         sttKeyRowTitle.text = when (selectedStt) {

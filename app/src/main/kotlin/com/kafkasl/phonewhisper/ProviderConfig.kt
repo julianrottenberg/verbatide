@@ -104,7 +104,7 @@ object ProviderConfig {
 
     private val MISTRAL_DEFAULTS = Defaults(
         sttUrl = "https://api.mistral.ai/v1/audio/transcriptions",
-        sttModel = "voxtral-mini-latest",
+        sttModel = "voxtral-mini-2602",
         chatUrl = "https://api.mistral.ai/v1/chat/completions",
         chatModel = "mistral-small-latest",
     )
