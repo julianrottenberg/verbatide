@@ -13,15 +13,18 @@ import kotlin.concurrent.thread
 /**
  * fal.ai Queue-based STT via Wizper (whisper v3 large).
  *
- * Flow is intentionally different from OpenAI-compatible multipart:
- *   POST https://queue.fal.run/fal-ai/wizper  {audio_url, task, language?}
- *   -> {request_id, status_url, response_url}
- *   poll  GET status_url  -> {status: IN_QUEUE|IN_PROGRESS|COMPLETED|FAILED}
- *   GET response_url      -> {text, chunks, ...}
+ * Sync:  POST https://fal.run/fal-ai/wizper           {audio_url, task, language, version}
+ * Queue: POST https://queue.fal.run/fal-ai/wizper     -> {request_id, status_url, response_url}
+ *        poll GET status_url -> {status: IN_QUEUE|IN_PROGRESS|COMPLETED|FAILED}
+ *        GET response_url   -> {text, chunks, languages}
  *
  * The local audio WAV is sent inline as a data URI (fal supports data: URIs
  * for file inputs; uploading separately isn't needed for dictation-sized clips).
  * Auth is `Authorization: Key <key>` (not Bearer).
+ *
+ * Model card: https://fal.ai/models/fal-ai/wizper/api — defaults to
+ * language="en" and task="transcribe"; to support auto-detect we must
+ * send language: null explicitly so wizper does not force English output.
  */
 object FalTranscriber {
 
@@ -51,14 +54,17 @@ object FalTranscriber {
                     return@thread
                 }
                 val dataUri = "data:audio/wav;base64,${Base64.encodeToString(wavData, Base64.NO_WRAP)}"
-                val lang = language?.takeIf { it.isNotBlank() && it != "auto" }
+                val lang = language?.trim()?.takeIf { it.isNotBlank() && it.lowercase() != "auto" }?.lowercase()
+                // language = null means auto-detect for wizper; "en" default
+                // would force English output. Send null explicitly for auto.
+                val languageJsonValue: Any = if (lang != null) lang else JSONObject.NULL
 
                 val payload = JSONObject().apply {
                     put("audio_url", dataUri)
                     put("task", "transcribe")
-                    if (lang != null) put("language", lang)
-                    // Optional: chunk-level timestamps are useful for debugging
-                    // but not needed for dictation, so we skip them.
+                    put("language", languageJsonValue)
+                    put("version", "3")
+                    put("chunk_level", "segment")
                 }
 
                 val req = Request.Builder()
@@ -81,7 +87,7 @@ object FalTranscriber {
                     return@thread
                 }
 
-                Log.d(TAG, "Wizper submit: ${respBody.take(300)}")
+                Log.d(TAG, "Wizper submit: ${respBody.take(500)} — payload language=${payload.opt("language")}")
                 val obj = try { JSONObject(respBody) } catch (e: Exception) {
                     callback(Result(null, "fal.ai: invalid JSON (${e.message})"))
                     return@thread
@@ -170,16 +176,17 @@ object FalTranscriber {
                     if (alreadyCalled) Log.w(TAG, "fetch ${r.code}: $body")
                     return@use null
                 }
-                val obj = JSONObject(body)
-                // wizper returns {text: "...", chunks: [...]} at top level, or
-                // {output: {text: ...}} — handle both.
-                val text = when {
+                val obj: JSONObject? = try { JSONObject(body) } catch (e: Exception) {
+                    Log.w(TAG, "fetch invalid JSON: ${e.message} — ${body.take(500)}")
+                    return@use null
+                }
+                // wizper returns {text, chunks, languages} top-level, sometimes
+                // wrapped as {output: {...}} or queue logs. Handle both.
+                val text: String? = when {
+                    obj == null -> null
                     obj.has("text") -> obj.getString("text").trim()
-                    obj.has("output") -> obj.getJSONObject("output").optString("text", "").trim()
-                    obj.has("logs") && obj.has("status") -> {
-                        // Queue / response wrapper: status COMPLETED logs — try nested
-                        null
-                    }
+                    obj.has("output") && obj.get("output") is JSONObject ->
+                        (obj.get("output") as JSONObject).optString("text", "").trim()
                     else -> null
                 }
                 text?.takeIf { it.isNotBlank() }

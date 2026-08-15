@@ -82,9 +82,15 @@ class PostProcessorTest {
         assertTrue(out.contains("never translate", ignoreCase = true))
     }
 
-    @Test fun `language guard respects prompts that mention translation`() {
+    @Test fun `language guard with concrete hint overrides generic no-translate line`() {
+        val p = "Never translate: always respond in the same language as the input."
+        val out = PostProcessor.withLanguageGuard(p, "German")
+        assertTrue(out.contains("German"))
+    }
+
+    @Test fun `language guard still respects user-requested translate without a language hint`() {
         val p = "Translate this to English."
-        assertEquals(p, PostProcessor.withLanguageGuard(p, "German"))
+        assertEquals(p, PostProcessor.withLanguageGuard(p, null))
     }
 
     @Test fun `language guard generic when no hint`() {

@@ -177,23 +177,26 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
     }
 
     /**
-     * Appends a same-language rule to the cleanup system prompt unless the
-     * prompt itself already mentions translation (then the user is clearly
-     * driving language behaviour intentionally and we stay out of the way).
+     * Ensures the cleanup prompt keeps the original language.
      *
-     * This is enforced at request time (not only in the default prompt text)
-     * because users have prompts saved in prefs that predate the rule.
+     * If we know the transcript language (from the user's pinned language or
+     * Whisper's detected language), we always append a concrete language hint
+     * — even when the prompt already mentions translation generically — so the
+     * model knows WHICH language to keep.
      */
     fun withLanguageGuard(prompt: String, languageHint: String?): String {
-        if (prompt.contains("translat", ignoreCase = true)) return prompt
-        return if (!languageHint.isNullOrBlank()) {
-            prompt + "\n\nIMPORTANT: The transcript is in $languageHint. Clean it up in " +
+        if (!languageHint.isNullOrBlank()) {
+            return prompt.rstripTrailing() +
+                "\n\nIMPORTANT: The transcript is in $languageHint. Clean it up in " +
                 "$languageHint — never translate it into another language."
-        } else {
-            prompt + "\n\nIMPORTANT: Never translate the transcript. Always respond in the " +
-                "same language as the transcript."
         }
+        if (prompt.contains("translat", ignoreCase = true)) return prompt
+        return prompt.rstripTrailing() +
+            "\n\nIMPORTANT: Never translate the transcript. Always respond in the " +
+            "same language as the transcript."
     }
+
+    private fun String.rstripTrailing(): String = trimEnd('\n', ' ')
 
     private fun applyReasoning(bodyJson: JSONObject, chatUrl: String, reasoning: Reasoning) {
         if (reasoning == Reasoning.DEFAULT) return
