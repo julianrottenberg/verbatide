@@ -9,12 +9,11 @@ import java.io.File
 /**
  * Append-only JSON transcript history.
  *
- * Defaults: enabled, 50 MB cap OR 90 days, whichever fires first; oldest
+ * Defaults: enabled, 50 MB cap OR 90 days, whichever fires first; older
  * entries are dropped. User can set max MB (0=unlimited) and max days
  * (0=keep forever) independently, plus clear-all.
  *
  * Stored at filesDir/transcription_history.json — shared prefs stay light.
- * TODO: migrate to Room if you need query/indexing.
  */
 data class HistoryEntry(
     val ts: Long,
@@ -107,5 +106,24 @@ object HistoryManager {
         historyFile(ctx).length()
     } catch (_: Exception) {
         0L
+    }
+
+    fun removeByTs(ctx: Context, ts: Long) = synchronized(this) {
+        val file = historyFile(ctx)
+        if (!file.exists()) return
+        val list = load(ctx).filter { it.ts != ts }
+        save(ctx, list)
+    }
+
+    private fun save(ctx: Context, list: List<HistoryEntry>) = synchronized(this) {
+        val f = historyFile(ctx)
+        val arr = JSONArray()
+        for (e in list) {
+            arr.put(JSONObject().apply {
+                put("ts", e.ts); put("text", e.text)
+                put("provider", e.provider); if (e.lang != null) put("lang", e.lang)
+            })
+        }
+        try { f.writeText(arr.toString()) } catch (_: Exception) {}
     }
 }

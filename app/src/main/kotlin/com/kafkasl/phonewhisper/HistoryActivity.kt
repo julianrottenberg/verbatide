@@ -118,7 +118,7 @@ class HistoryActivity : AppCompatActivity() {
                         .setTitle("Delete entry?")
                         .setMessage(e.text.take(80) + if (e.text.length > 80) "…" else "")
                         .setPositiveButton("Delete") { _, _ ->
-                            HistoryManager.remove(this@HistoryActivity, e.ts)
+                            HistoryManager.removeByTs(this@HistoryActivity, e.ts)
                             render(search.text.toString().trim())
                             Toast.makeText(this@HistoryActivity, "Deleted", Toast.LENGTH_SHORT).show()
                             true
