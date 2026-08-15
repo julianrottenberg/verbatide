@@ -53,13 +53,20 @@ object TranscriberClient {
         val bodyBuilder = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("model", sttModel)
+            // Together's /audio/transcriptions still drifts to English when
+            // `language` is not pinned (even when cleanup is off) — always
+            // pass the user's Transcription language setting when set.
             .addFormDataPart("file", "audio.wav", wavData.toRequestBody("audio/wav".toMediaType()))
             // verbose_json adds a `language` field so the cleanup step can be
-            // told which language to keep (prevents LLM cleanup translating).
-            .addFormDataPart("response_format", "verbose_json")
+            // told which language to keep. Not all providers support it —
+            // Together rejects it, so omit for Together.
+            .let { b ->
+                if (!sttUrl.contains("together.ai")) b.addFormDataPart("response_format", "verbose_json") else b
+            }
 
-        // Pinning the language prevents Whisper's auto-translate-to-English
-        // behaviour for non-English speech ("auto" = let the model detect).
+        // Pinning the language prevents drift-to-English for non-English
+        // speech. `language: null` / 'auto' = provider decides — pass null
+        // only when the user picked auto-detect.
         if (!language.isNullOrBlank() && language != "auto") {
             bodyBuilder.addFormDataPart("language", language)
         }

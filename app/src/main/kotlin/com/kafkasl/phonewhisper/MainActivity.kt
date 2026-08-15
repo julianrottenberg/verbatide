@@ -1,6 +1,7 @@
 package com.kafkasl.phonewhisper
 
 import android.Manifest
+import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
@@ -27,6 +28,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusSubtitle: TextView
     private lateinit var audioRowSub: TextView
     private lateinit var accRowSub: TextView
+    // Legacy single-key row — hidden since v0.6.0, kept for refresh() compat.
     private lateinit var keyRowSub: TextView
     private lateinit var keyRowTitle: TextView
     private lateinit var promptRowSub: TextView
@@ -269,16 +271,16 @@ class MainActivity : AppCompatActivity() {
             importLauncher.launch(arrayOf("application/json", "text/*", "application/octet-stream"))
         })
 
-        // Legacy single "API key" section removed — keys live inside their
-        // respective Transcription/Cleanup provider groups since v0.6.0.
-        // Keep the lateinit backing fields wired for backwards-compat refresh()
-        // so we don't crash on older prefs, but leave the row off-screen.
+        // --- Transcription history ---
+        root.addView(buildHistorySection())
+
+        // Hidden: legacy single "API key" row lives inside its provider
+        // groups since v0.6.0 — keep the field initialised for refresh().
         run {
             val keyRow = settingsRow("API key", "Tap to set") { promptApiKey(isStt = true) }
             keyRow.visibility = View.GONE
             keyRowTitle = keyRow.findViewWithTag("title")
             keyRowSub = keyRow.findViewWithTag("subtitle")
-            // Not added to root — intentionally hidden.
         }
 
         setContentView(
@@ -1026,6 +1028,110 @@ class MainActivity : AppCompatActivity() {
         val color = ta.getColor(0, 0)
         ta.recycle()
         return color
+    }
+
+    private fun buildHistorySection(): LinearLayout {
+        val container = vertical(0)
+        container.addView(sectionHeader("Transcription history"))
+
+        val subtitle = {
+            val c = HistoryManager.count(this)
+            val b = HistoryManager.bytesUsed(this)
+            val kb = (b / 1024).coerceAtLeast(0)
+            "$c entries · ~${kb} KB" // quick summary
+        }
+
+        val browseRow = settingsRow("Browse history", subtitle()) {
+            val entries = HistoryManager.load(this)
+            if (entries.isEmpty()) {
+                Toast.makeText(this, "No transcriptions yet", Toast.LENGTH_SHORT).show()
+                return@settingsRow
+            }
+            val labels = entries.map { e ->
+                val d = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
+                d.format(java.util.Date(e.ts)) + " · " + e.text.take(48)
+            }.toTypedArray()
+            // Keep entries stable by index — copy to array.
+            val arr = entries.toTypedArray()
+            android.app.AlertDialog.Builder(this)
+                .setTitle("History — tap to copy")
+                .setItems(labels) { _, which ->
+                    val t = arr[which].text
+                    (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                        .setPrimaryClip(ClipData.newPlainText("phonewhisper", t))
+                    Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("Close", null)
+                .show()
+        }
+
+        val historyLimitRow = settingsRow(
+            "Retention limit",
+            "${prefs().getInt(HistoryManager.KEY_HISTORY_MAX_MB, HistoryManager.DEF_MAX_MB)} MB · ${prefs().getInt(HistoryManager.KEY_HISTORY_MAX_DAYS, HistoryManager.DEF_MAX_DAYS)} days — tap to change",
+        ) {
+            val curMb = prefs().getInt(HistoryManager.KEY_HISTORY_MAX_MB, HistoryManager.DEF_MAX_MB)
+            val curDays = prefs().getInt(HistoryManager.KEY_HISTORY_MAX_DAYS, HistoryManager.DEF_MAX_DAYS)
+            val mbInput = EditText(this).apply {
+                hint = "Max MB (0 = unlimited)"
+                setText(if (curMb == 0) "" else curMb.toString())
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            }
+            val daysInput = EditText(this).apply {
+                hint = "Max days (0 = forever)"
+                setText(if (curDays == 0) "" else curDays.toString())
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            }
+            val form = vertical(dp(24)).apply {
+                addView(TextView(this@MainActivity).apply { text = "Max stored (MB)"; textSize = 12f })
+                addView(mbInput)
+                addView(TextView(this@MainActivity).apply { text = "Keep for (days)"; textSize = 12f })
+                addView(daysInput)
+            }
+            android.app.AlertDialog.Builder(this)
+                .setTitle("History retention")
+                .setView(form.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
+                .setPositiveButton("Save") { _, _ ->
+                    val mb = mbInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(0) ?: curMb
+                    val days = daysInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(0) ?: curDays
+                    prefs().edit()
+                        .putInt(HistoryManager.KEY_HISTORY_MAX_MB, mb)
+                        .putInt(HistoryManager.KEY_HISTORY_MAX_DAYS, days)
+                        .apply()
+                    refresh()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+
+        val enabledRow = run {
+            val sw = MaterialSwitch(this).apply {
+                isClickable = false
+                isChecked = HistoryManager.enabled(prefs())
+            }
+            val row = settingsRow("Save history", if (sw.isChecked) "On" else "Off", sw) {
+                val nv = !prefs().getBoolean(HistoryManager.KEY_HISTORY_ENABLED, HistoryManager.DEF_HISTORY_ENABLED)
+                prefs().edit().putBoolean(HistoryManager.KEY_HISTORY_ENABLED, nv).apply()
+                sw.isChecked = nv
+                refresh()
+            }
+            row.tag = "history_enabled_row"
+            row
+        }
+
+        val clearRow = settingsRow("Clear history", "Remove all saved transcriptions") {
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Clear history?")
+                .setMessage("${HistoryManager.count(this)} entries will be deleted.")
+                .setPositiveButton("Clear") { _, _ -> HistoryManager.clear(this); refresh() }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+
+        container.addView(enabledRow)
+        container.addView(browseRow)
+        container.addView(historyLimitRow)
+        container.addView(clearRow)
+        return container
     }
 
     private fun prefs() = getSharedPreferences("phonewhisper", MODE_PRIVATE)

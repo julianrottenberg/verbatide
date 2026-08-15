@@ -486,7 +486,7 @@ class WhisperAccessibilityService : AccessibilityService() {
                 // detected language so cleanup knows what NOT to translate.
                 val pinned = prefs().getString("stt_language", "auto") ?: "auto"
                 val hint = if (pinned != "auto") langName(pinned) else language
-                handleTranscriptionResult(text, hint)
+                handleTranscriptionResult(text, hint, selectedStt.name.lowercase())
             } else {
                 handler.post {
                     toast("Error: ${error ?: "empty transcript"}")
@@ -527,7 +527,7 @@ class WhisperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun handleTranscriptionResult(text: String?, languageHint: String? = null) {
+    private fun handleTranscriptionResult(text: String?, languageHint: String? = null, provider: String = "") {
         if (text.isNullOrBlank()) {
             handler.post {
                 toast("No speech detected")
@@ -546,6 +546,7 @@ class WhisperAccessibilityService : AccessibilityService() {
                 handler.post {
                     toast("Post-processing needs API key. Using raw text.")
                     injectText(text)
+                    HistoryManager.append(this@WhisperAccessibilityService, HistoryEntry(System.currentTimeMillis(), text, provider, languageHint))
                     state = State.IDLE
                     setBusy(false)
                     setAppearance(COLOR_IDLE)
@@ -553,8 +554,8 @@ class WhisperAccessibilityService : AccessibilityService() {
                 return
             }
 
-            val prompt = prefs().getString("post_processing_prompt", PostProcessor.DEFAULT_PROMPT) ?: PostProcessor.DEFAULT_PROMPT
             val p2 = prefs()
+            val prompt = prefs().getString("post_processing_prompt", PostProcessor.DEFAULT_PROMPT) ?: PostProcessor.DEFAULT_PROMPT
             PostProcessor.process(
                 text = text,
                 prompt = prompt,
@@ -567,8 +568,10 @@ class WhisperAccessibilityService : AccessibilityService() {
                 handler.post {
                     if (result.text != null && result.text.isNotBlank()) {
                         injectText(result.text)
+                        HistoryManager.append(this@WhisperAccessibilityService, HistoryEntry(System.currentTimeMillis(), result.text, provider, languageHint))
                     } else {
                         injectText(text, feedback = "Cleanup failed — raw copied to clipboard", feedbackDurationMs = 3000)
+                        HistoryManager.append(this@WhisperAccessibilityService, HistoryEntry(System.currentTimeMillis(), text, provider, languageHint))
                     }
                     state = State.IDLE
                     setBusy(false)
@@ -578,6 +581,7 @@ class WhisperAccessibilityService : AccessibilityService() {
         } else {
             handler.post {
                 injectText(text)
+                HistoryManager.append(this@WhisperAccessibilityService, HistoryEntry(System.currentTimeMillis(), text, provider, languageHint))
                 state = State.IDLE
                 setBusy(false)
                 setAppearance(COLOR_IDLE)

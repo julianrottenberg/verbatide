@@ -2,7 +2,6 @@ package com.kafkasl.phonewhisper
 
 import android.util.Log
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -57,9 +56,21 @@ object FalTranscriber {
                     return@thread
                 }
                 // Upload to fal Storage first — wizper rejects data: URIs
-                // (https://fal.ai/models/fal-ai/wizper reports "Unsupported data URL").
+                // (https://fal.ai/models/fal-ai/wizper reports "Unsupported data URL" — Input {}).
+                if (cancelled) {
+                    callback(Result(null, "Cancelled"))
+                    return@thread
+                }
                 val fileUrl = uploadToFalStorage(apiKey, wavData)
-                    ?: return@thread // error already reported via callback
+                if (fileUrl == null) {
+                    if (!cancelled) callback(Result(null, "fal.ai upload failed — check API key and network"))
+                    else callback(Result(null, "Cancelled"))
+                    return@thread
+                }
+                if (cancelled) {
+                    callback(Result(null, "Cancelled"))
+                    return@thread
+                }
 
                 val lang = language?.trim()?.takeIf { it.isNotBlank() && it.lowercase() != "auto" }?.lowercase()
                 // language = null means auto-detect for wizper; "en" default
@@ -122,13 +133,14 @@ object FalTranscriber {
         }
     }
 
-    /**
-     * fal Storage: POST /storage/upload/initiate -> {upload_url, file_url}, then PUT wav bytes.
-     * Returns the file_url to use as audio_url, or null after reporting an error via callback.
-     */
     @Volatile
     var cancelled = false
     fun cancel() { cancelled = true }
+
+    /**
+     * fal Storage: POST /storage/upload/initiate -> {upload_url, file_url}, then PUT wav bytes.
+     * Returns the file_url to use as audio_url, or null on failure.
+     */
 
     private fun uploadToFalStorage(apiKey: String, wavData: ByteArray): String? {
         val initBody = JSONObject().apply {
@@ -186,7 +198,15 @@ object FalTranscriber {
     ): String? {
         val deadline = System.currentTimeMillis() + MAX_POLL_MS
         while (System.currentTimeMillis() < deadline) {
+            if (cancelled) {
+                callback(Result(null, "Cancelled"))
+                return null
+            }
             Thread.sleep(POLL_INTERVAL_MS)
+            if (cancelled) {
+                callback(Result(null, "Cancelled"))
+                return null
+            }
 
             val statusResp = try {
                 client.newCall(
