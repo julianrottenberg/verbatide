@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.util.TypedValue
@@ -12,6 +13,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.google.android.material.button.MaterialButton
@@ -40,6 +42,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var customChatModelSub: TextView
     private lateinit var reasoningRowSub: TextView
     private lateinit var reasoningRow: LinearLayout
+    private lateinit var languageRow: LinearLayout
+    private lateinit var languageRowSub: TextView
+
+    // SAF launchers for settings backup/restore. Must be field initializers so
+    // they register before the activity is created.
+    private val exportLauncher =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
+            uri?.let { writeBackup(it) }
+        }
+    private val importLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+            uri?.let { readBackup(it) }
+        }
 
     private val modelRows = mutableMapOf<String, ModelRowViews>()
     private val promptRows = mutableMapOf<String, PromptRowViews>()
@@ -109,6 +124,13 @@ class MainActivity : AppCompatActivity() {
             refresh()
         }
         root.addView(cloudRow)
+
+        // --- Transcription language (cloud only; Whisper auto-translates to
+        // English without an explicit language param, so this matters for
+        // non-English users) ---
+        languageRow = settingsRow("Transcription language", currentLanguageLabel()) { promptLanguage() }
+        languageRowSub = languageRow.findViewWithTag("subtitle")
+        root.addView(languageRow)
 
         // --- Provider (visible only when cloud) ---
         providerContainer = vertical(0)
@@ -194,6 +216,15 @@ class MainActivity : AppCompatActivity() {
         reasoningRow = settingsRow("Reasoning effort", currentReasoningLabel()) { promptReasoning() }
         reasoningRowSub = reasoningRow.findViewWithTag("subtitle")
         root.addView(reasoningRow)
+
+        // --- Backup & restore ---
+        root.addView(sectionHeader("Backup & restore"))
+        root.addView(settingsRow("Export settings", "Save endpoints, prompts & preferences to a file") {
+            exportLauncher.launch("phone-whisper-backup.json")
+        })
+        root.addView(settingsRow("Import settings", "Restore from a previously exported file") {
+            importLauncher.launch(arrayOf("application/json", "text/*", "application/octet-stream"))
+        })
 
         // --- API Key ---
         root.addView(sectionHeader("API key"))
@@ -452,6 +483,8 @@ class MainActivity : AppCompatActivity() {
 
         // Visibility
         modelContainer.visibility = if (useLocal) View.VISIBLE else View.GONE
+        languageRow.visibility = if (useLocal) View.GONE else View.VISIBLE
+        languageRowSub.text = currentLanguageLabel()
         providerContainer.visibility = if (!useLocal) View.VISIBLE else View.GONE
         customProviderContainer.visibility = if (!useLocal && isCustomProvider) View.VISIBLE else View.GONE
         promptContainer.visibility = if (usePostProcessing) View.VISIBLE else View.GONE
@@ -665,6 +698,105 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    // --- Transcription language ---
+
+    private data class LangOption(val label: String, val code: String)
+
+    private val langOptions = listOf(
+        LangOption("Auto-detect", "auto"),
+        LangOption("English", "en"),
+        LangOption("German", "de"),
+        LangOption("Spanish", "es"),
+        LangOption("French", "fr"),
+        LangOption("Italian", "it"),
+        LangOption("Portuguese", "pt"),
+        LangOption("Dutch", "nl"),
+        LangOption("Polish", "pl"),
+        LangOption("Russian", "ru"),
+        LangOption("Turkish", "tr"),
+        LangOption("Japanese", "ja"),
+        LangOption("Korean", "ko"),
+        LangOption("Chinese", "zh"),
+    )
+
+    private fun currentLanguageCode(): String =
+        prefs().getString("stt_language", "auto") ?: "auto"
+
+    private fun currentLanguageLabel(): String {
+        val code = currentLanguageCode()
+        val known = langOptions.firstOrNull { it.code == code }
+        return known?.label ?: "Custom ($code)"
+    }
+
+    private fun promptLanguage() {
+        val labels = (langOptions.map { it.label } + "Custom code…").toTypedArray()
+        val current = langOptions.indexOfFirst { it.code == currentLanguageCode() }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Transcription language")
+            .setSingleChoiceItems(labels, current) { dialog, which ->
+                dialog.dismiss()
+                if (which == labels.size - 1) promptCustomLanguage()
+                else {
+                    prefs().edit().putString("stt_language", langOptions[which].code).apply()
+                    refresh()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun promptCustomLanguage() {
+        val input = EditText(this).apply {
+            hint = "ISO-639-1 code, e.g. uk"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT
+            val cur = currentLanguageCode()
+            if (cur != "auto") setText(cur)
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Custom language code")
+            .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
+            .setPositiveButton("Save") { _, _ ->
+                val code = input.text.toString().trim().lowercase()
+                if (code.matches(Regex("^[a-z]{2,3}$"))) {
+                    prefs().edit().putString("stt_language", code).apply()
+                    refresh()
+                } else {
+                    Toast.makeText(this, "Invalid language code", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    // --- Backup & restore ---
+
+    private fun writeBackup(uri: Uri) {
+        try {
+            contentResolver.openOutputStream(uri)?.bufferedWriter()?.use {
+                it.write(SettingsBackup.export(prefs()))
+            } ?: throw java.io.IOException("Could not open file")
+            Toast.makeText(this, "Settings exported (API key not included)", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun readBackup(uri: Uri) {
+        try {
+            val text = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                ?: throw java.io.IOException("Could not read file")
+            val result = SettingsBackup.import(prefs(), text)
+            if (result.isSuccess) {
+                Toast.makeText(this, "Imported ${result.getOrNull() ?: 0} settings", Toast.LENGTH_SHORT).show()
+                refresh()
+            } else {
+                Toast.makeText(this, "Import failed: invalid backup file", Toast.LENGTH_LONG).show()
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     // -----------------------------------------------------------------------

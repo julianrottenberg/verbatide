@@ -34,17 +34,25 @@ object TranscriberClient {
         apiKey: String,
         sttUrl: String = "https://api.openai.com/v1/audio/transcriptions",
         sttModel: String = "whisper-1",
+        language: String? = null,
         callback: (Result) -> Unit,
     ) {
         if (wavData.size > MAX_WAV_BYTES) {
             callback(Result(null, "Audio too large (${wavData.size / (1024*1024)} MB > 25 MB)"))
             return
         }
-        val body = MultipartBody.Builder()
+        val bodyBuilder = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("model", sttModel)
             .addFormDataPart("file", "audio.wav", wavData.toRequestBody("audio/wav".toMediaType()))
-            .build()
+
+        // Pinning the language prevents Whisper's auto-translate-to-English
+        // behaviour for non-English speech ("auto" = let the model detect).
+        if (!language.isNullOrBlank() && language != "auto") {
+            bodyBuilder.addFormDataPart("language", language)
+        }
+
+        val body = bodyBuilder.build()
 
         val request = Request.Builder()
             .url(sttUrl)

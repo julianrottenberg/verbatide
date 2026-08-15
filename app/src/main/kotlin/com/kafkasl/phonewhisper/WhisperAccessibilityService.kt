@@ -412,6 +412,7 @@ class WhisperAccessibilityService : AccessibilityService() {
             apiKey = apiKey,
             sttUrl = ProviderConfig.sttUrl(p),
             sttModel = ProviderConfig.sttModel(p),
+            language = prefs().getString("stt_language", "auto"),
         ) { result ->
             if (result.text != null && result.text.isNotBlank()) {
                 handleTranscriptionResult(result.text)

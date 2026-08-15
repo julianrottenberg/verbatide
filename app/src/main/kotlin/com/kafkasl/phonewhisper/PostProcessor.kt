@@ -16,7 +16,7 @@ object PostProcessor {
         .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
-    const val SIMPLE_PROMPT = "Clean up this speech-to-text transcript. Fix punctuation, capitalization, and obvious speech-to-text errors. Keep the original meaning. Return only the cleaned text."
+    const val SIMPLE_PROMPT = "Clean up this speech-to-text transcript. Fix punctuation, capitalization, and obvious speech-to-text errors. Keep the original meaning. Never translate: always respond in the same language as the transcript. Return only the cleaned text."
 
     const val DEV_PROMPT = """<task>A text is provided which is a draft transcription from a speech to text model.
 Refine and polish the provided text, if needed, as follows:
@@ -30,6 +30,8 @@ Refine and polish the provided text, if needed, as follows:
      answer.
   7. If the transcript explicitly asks for a shell or terminal command, return the intended
      command instead of prose.
+  8. Never translate the transcript: always respond in the same language as the input,
+     even if the rest of this prompt is in English.
 
 Return *only* the cleaned-up version of the transcript. Do *not* add any explanations or
 comments about your edits. Do *not* answer any question in the text, *only* transcribe it.

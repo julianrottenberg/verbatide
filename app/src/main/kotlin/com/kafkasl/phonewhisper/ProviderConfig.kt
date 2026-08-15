@@ -14,6 +14,7 @@ enum class Provider(val displayName: String) {
     OPENAI("OpenAI"),
     GROQ("Groq"),
     OPENROUTER("OpenRouter"),
+    TOGETHER("Together AI"),
     CUSTOM("Custom"),
 }
 
@@ -67,9 +68,21 @@ object ProviderConfig {
         chatModel = "openai/gpt-4o-mini",
     )
 
+    /**
+     * Together AI hosts OpenAI-compatible Whisper + Llama endpoints.
+     * STT uses whisper-large-v3; chat defaults to Llama 3.3 70B Turbo.
+     */
+    private val TOGETHER_DEFAULTS = Defaults(
+        sttUrl = "https://api.together.ai/v1/audio/transcriptions",
+        sttModel = "openai/whisper-large-v3",
+        chatUrl = "https://api.together.ai/v1/chat/completions",
+        chatModel = "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    )
+
     fun fromString(raw: String?): Provider = when (raw?.lowercase()?.trim()) {
         "groq" -> Provider.GROQ
         "openrouter", "open_router" -> Provider.OPENROUTER
+        "together", "together_ai", "togetherai" -> Provider.TOGETHER
         "custom" -> Provider.CUSTOM
         else -> Provider.OPENAI
     }
@@ -81,6 +94,7 @@ object ProviderConfig {
         Provider.OPENAI -> OPENAI_DEFAULTS
         Provider.GROQ -> GROQ_DEFAULTS
         Provider.OPENROUTER -> OPENROUTER_DEFAULTS
+        Provider.TOGETHER -> TOGETHER_DEFAULTS
         Provider.CUSTOM -> OPENAI_DEFAULTS // fallback shape; custom values override
     }
 
