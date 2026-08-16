@@ -40,7 +40,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: verbatide-debug-apk
-          path: app/build/outputs/apk/debug/verbatide-*.apk
+          path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
       - name: Upload APK (legacy app-debug.apk fallback)
         uses: actions/upload-artifact@v4
@@ -74,6 +74,6 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/debug/verbatide-*.apk
+          files: app/build/outputs/apk/debug/*.apk
           fail_on_unmatched_files: false
           generate_release_notes: true
