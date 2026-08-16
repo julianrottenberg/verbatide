@@ -96,7 +96,7 @@ class MainActivity : AppCompatActivity() {
         val root = vertical(0, 0)
 
         val header = TextView(this).apply {
-            text = "Phone Whisper"
+            text = "Verbatide"
             textSize = 32f
             setPadding(dp(24), dp(64), dp(24), dp(24))
         }
@@ -278,7 +278,7 @@ class MainActivity : AppCompatActivity() {
         // --- Backup & restore ---
         root.addView(sectionHeader("Backup & restore"))
         root.addView(settingsRow("Export settings", "Save endpoints, prompts & preferences to a file") {
-            exportLauncher.launch("phone-whisper-backup.json")
+            exportLauncher.launch("verbatide-backup.json")
         })
         root.addView(settingsRow("Import settings", "Restore from a previously exported file") {
             importLauncher.launch(arrayOf("application/json", "text/*", "application/octet-stream"))
@@ -1185,6 +1185,11 @@ class MainActivity : AppCompatActivity() {
         container.addView(dictRow)
         container.addView(historyLimitRow)
         container.addView(clearRow)
+
+        val aboutRow = settingsRow("About Verbatide", "Fork of Phone Whisper by kafkasl — tap to view on GitHub") {
+            startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/kafkasl/phone-whisper")))
+        }
+        container.addView(aboutRow)
         return container
     }
 

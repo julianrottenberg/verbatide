@@ -364,7 +364,7 @@ class WhisperAccessibilityService : AccessibilityService() {
     private fun startRecording() {
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
             != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            toast("Grant audio permission in Phone Whisper app"); return
+            toast("Grant audio permission in Verbatide"); return
         }
 
         val bufSize = AudioRecord.getMinBufferSize(
@@ -504,7 +504,7 @@ class WhisperAccessibilityService : AccessibilityService() {
         when (selectedStt) {
             Provider.FAL -> {
                 val apiKey = SecurePrefs.getSttApiKey(this)
-                if (apiKey.isBlank()) { handler.removeCallbacks(cancelTimeout); reset("Set STT API key (fal.ai) in Phone Whisper app"); return }
+                if (apiKey.isBlank()) { handler.removeCallbacks(cancelTimeout); reset("Set STT API key (fal.ai) in Verbatide"); return }
                 FalTranscriber.transcribe(wav, apiKey, sttLanguage) { r ->
                     handler.removeCallbacks(cancelTimeout)
                     onResult(r.text, r.language, r.error)
@@ -512,7 +512,7 @@ class WhisperAccessibilityService : AccessibilityService() {
             }
             else -> {
                 val apiKey = SecurePrefs.getSttApiKey(this)
-                if (apiKey.isBlank()) { handler.removeCallbacks(cancelTimeout); reset("Set STT API key in Phone Whisper app"); return }
+                if (apiKey.isBlank()) { handler.removeCallbacks(cancelTimeout); reset("Set STT API key in Verbatide"); return }
                 TranscriberClient.transcribe(
                     wavData = wav,
                     apiKey = apiKey,

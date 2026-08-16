@@ -11,7 +11,7 @@ android {
         onVariants { v ->
             v.outputs.forEach { out ->
                 (out as com.android.build.api.variant.impl.VariantOutputImpl).outputFileName.set(
-                    "verbatide-v${'$'}{v.versionName}.apk"
+                    "verbatide-${'$'}{v.versionName}.apk"
                 )
             }
         }
@@ -22,8 +22,8 @@ android {
         applicationId = "com.julianrottenberg.verbatide"
         minSdk = 30
         targetSdk = 35
-        versionCode = 21
-        versionName = "0.9.6"
+        versionCode = 22
+        versionName = "0.9.7"
 
         ndk { abiFilters += "arm64-v8a" }
     }

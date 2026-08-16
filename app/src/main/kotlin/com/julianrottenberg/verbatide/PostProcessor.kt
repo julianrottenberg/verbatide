@@ -116,7 +116,7 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
      */
     enum class Reasoning(val key: String, val label: String, val subtitle: String) {
         DEFAULT("default", "Provider default", "Use whatever the model/provider defaults to"),
-        OFF("off", "Off", "Disable reasoning (OpenRouter only; others ignore)"),
+        OFF("off", "Off", "Disable reasoning"),
         LOW("low", "Low", "Minimal thinking — fastest/cheapest for cleanup"),
         MEDIUM("medium", "Medium", "Balanced thinking"),
         HIGH("high", "High", "Maximum thinking (slowest, rarely useful for cleanup)"),
