@@ -46,13 +46,13 @@ jobs:
           fi
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: verbatide-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
       - name: Upload APK (legacy app-debug.apk fallback)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: verbatide-debug-apk-legacy
           path: app/build/outputs/apk/debug/app-debug.apk
