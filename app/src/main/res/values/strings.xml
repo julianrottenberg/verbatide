@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Phone Whisper</string>
+    <string name="app_name">Verbatide</string>
+    <string name="app_name_subtitle">Built on Phone Whisper</string>
     <string name="accessibility_description">Dictation: records audio, transcribes, and inserts text into focused fields.</string>
 </resources>

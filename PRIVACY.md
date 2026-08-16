@@ -1,12 +1,12 @@
-# Privacy Policy for Phone Whisper (fork: Groq / OpenRouter / Custom providers)
+# Privacy Policy for Verbatide (fork: Groq / OpenRouter / Custom providers)
 
-Phone Whisper is an Android dictation app that records speech, transcribes it, and inserts the result into text fields across apps.
+Verbatide is an Android dictation app that records speech, transcribes it, and inserts the result into text fields across apps.
 
 > This fork is based on [kafkasl/phone-whisper](https://github.com/kafkasl/phone-whisper). Where this page says "provider," it means whichever cloud provider you have selected in Settings (OpenAI, Groq, OpenRouter, or a custom OpenAI-compatible endpoint). Upstream's policy is otherwise unchanged.
 
 ## Data handling
 
-Phone Whisper supports two transcription modes.
+Verbatide supports two transcription modes.
 
 ### Local mode
 
@@ -33,13 +33,13 @@ I do not operate a relay server for these requests.
 
 ## Accessibility Service
 
-Phone Whisper uses Android Accessibility Service only to identify the currently focused text field and insert dictated text after you explicitly interact with the floating overlay button.
+Verbatide uses Android Accessibility Service only to identify the currently focused text field and insert dictated text after you explicitly interact with the floating overlay button.
 
-Phone Whisper is not designed to monitor browsing, collect screen content for analytics, or perform background automation.
+Verbatide is not designed to monitor browsing, collect screen content for analytics, or perform background automation.
 
 ## Data collection
 
-I do not run a backend for Phone Whisper and do not collect user accounts, analytics, or uploaded recordings myself.
+I do not run a backend for Verbatide and do not collect user accounts, analytics, or uploaded recordings myself.
 
 Third-party services you choose to use (OpenAI, Groq, OpenRouter, or your custom endpoint) may process data according to their own terms and privacy policies.
 

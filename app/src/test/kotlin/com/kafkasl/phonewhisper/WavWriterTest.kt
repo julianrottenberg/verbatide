@@ -1,4 +1,4 @@
-package com.kafkasl.phonewhisper
+package com.julianrottenberg.verbatide
 
 import org.junit.Assert.*
 import org.junit.Test

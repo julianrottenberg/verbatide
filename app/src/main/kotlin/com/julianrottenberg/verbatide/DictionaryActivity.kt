@@ -1,4 +1,4 @@
-package com.kafkasl.phonewhisper
+package com.julianrottenberg.verbatide
 
 import android.content.ClipData
 import android.content.ClipboardManager

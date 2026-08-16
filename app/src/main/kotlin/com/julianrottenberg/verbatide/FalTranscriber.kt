@@ -1,4 +1,4 @@
-package com.kafkasl.phonewhisper
+package com.julianrottenberg.verbatide
 
 import android.util.Log
 import okhttp3.MediaType.Companion.toMediaType
