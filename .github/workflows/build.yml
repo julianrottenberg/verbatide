@@ -36,6 +36,15 @@ jobs:
       - name: Run unit tests
         run: ./gradlew testDebugUnitTest --stacktrace
 
+      - name: Rename APK to verbatide
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          if [ -f "$APK" ]; then
+            VER=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+            cp "$APK" "app/build/outputs/apk/debug/verbatide-v${VER}.apk"
+            ls -lh app/build/outputs/apk/debug/
+          fi
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -70,6 +79,15 @@ jobs:
 
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace
+
+      - name: Rename APK to verbatide
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          if [ -f "$APK" ]; then
+            VER=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+            cp "$APK" "app/build/outputs/apk/debug/verbatide-v${VER}.apk"
+            ls -lh app/build/outputs/apk/debug/
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
