@@ -1,0 +1,7 @@
+(remote-only)
+
+- **Host has no JDK/SDK** — `make build`/`./gradlew` on host will fail. Use `gh` + Actions.
+- Workflow: `.github/workflows/build.yml` (`build` + `release`, `tags ["v*"]`, `workflow_dispatch`). Build: `assembleDebug` + `testDebugUnitTest` + `upload-artifact`. Release: same build + `softprops/action-gh-release@v2` attaching APK.
+- **APK naming is currently broken** — `app/build.gradle.kts` `androidComponents` used `verbatide-v${'$'}{v.versionName}` which literalized to `verbatide-.v.versionName.apk` (v0.9.7). Attempted fix to `verbatide-` + `variant.versionName.get()` hit `Unresolved reference: versionName`. Reverted to a workflow copy step `cp app-debug.apk verbatide-v${VER}.apk` before upload/release. Latest releases are single-file `verbatide-v*.apk` since v0.9.12 (v0.9.11 shipped both `app-debug.apk` + `verbatide-v0.9.11.apk`). Revisit by fixing the AGP `androidComponents` correctly or keeping the `cp` rename — don't re-introduce the literal.
+- Branch protection: repo is `julianrottenberg/verbatide` (redirect from `phone-whisper-fork`), `main` has ruleset `protect-main` — blocks deletion/`non_fast_forward` + requires `build` check. Solves earlier `Dependabot Updates` 404 on push (push checks are `build`, not dynamic Dependabot name).
+- `main` currently `v0.9.12` (`27`) is `Latest`. Some tags had versionCode regressions (`v0.9.3` shipped `16/0.8.0` after a `git reset --hard 6ca4eed` rewind) — keep monotonic.
