@@ -101,9 +101,55 @@ class WhisperAccessibilityService : AccessibilityService() {
         if (event == null) return
         when (event.eventType) {
             AccessibilityEvent.TYPE_VIEW_FOCUSED,
+            AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED,
+            AccessibilityEvent.TYPE_VIEW_CLICKED,
+            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
+            AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
-            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> updateBubbleVisibility()
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
+                // Fast path: the event source itself may be the input (many
+                // custom editors — Flutter, Compose, WebView — never surface
+                // FOCUS_INPUT at the root, so check the source first).
+                // NOTE: event.source must be recycled by the caller.
+                val src = try {
+                    event.source
+                } catch (_: Exception) {
+                    null
+                }
+                if (src != null) {
+                    try {
+                        if (isTextInputNode(src) &&
+                            (src.isFocused || src.isAccessibilityFocused)
+                        ) {
+                            updateBubbleVisibility()
+                            return
+                        }
+                    } finally {
+                        try { src.recycle() } catch (_: Exception) {}
+                    }
+                }
+                updateBubbleVisibility()
+                // The hierarchy is often not populated yet when
+                // WINDOW_STATE_CHANGED fires (e.g. Kimi's first chat screen):
+                // re-check shortly after so the bubble appears once the
+                // input node exists.
+                if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                    handler.postDelayed(visibilityCheck, 300)
+                    handler.postDelayed(visibilityCheck, 1000)
+                }
+            }
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
+                // Noisy event — debounce so tree walks don't thrash.
+                scheduleVisibilityCheck(150)
+            }
         }
+    }
+
+    private val visibilityCheck = Runnable { updateBubbleVisibility() }
+
+    private fun scheduleVisibilityCheck(delayMs: Long) {
+        handler.removeCallbacks(visibilityCheck)
+        handler.postDelayed(visibilityCheck, delayMs)
     }
 
     /**
@@ -124,19 +170,111 @@ class WhisperAccessibilityService : AccessibilityService() {
     }
 
     private fun hasFocusedEditableField(): Boolean {
-        val node = try {
-            rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-        } catch (e: Exception) {
-            null
+        // 1. Fast path: the input-focused node. Accept anything that can
+        //    take text, not just isEditable — WebView/Compose/Flutter nodes
+        //    often expose ACTION_SET_TEXT while isEditable is false.
+        // NOTE: rootInActiveWindow returns a new instance each call that
+        // must be recycled.
+        val activeRoot = try { rootInActiveWindow } catch (_: Exception) { null }
+        if (activeRoot != null) {
+            try {
+                try {
+                    activeRoot.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.let { node ->
+                        try {
+                            if (isTextInputNode(node)) return true
+                        } finally {
+                            try { node.recycle() } catch (_: Exception) {}
+                        }
+                    }
+                } catch (_: Exception) {
+                    // fall through to traversal
+                }
+                try {
+                    activeRoot.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { node ->
+                        try {
+                            if (node.isFocused && isTextInputNode(node)) return true
+                        } finally {
+                            try { node.recycle() } catch (_: Exception) {}
+                        }
+                    }
+                } catch (_: Exception) {
+                    // fall through to traversal
+                }
+                // Quick win before the expensive multi-window walk: the
+                // active root itself may already contain a focused input.
+                try {
+                    if (hasFocusedInputInTree(activeRoot)) return true
+                } catch (_: Exception) {
+                }
+            } finally {
+                try { activeRoot.recycle() } catch (_: Exception) {}
+            }
         }
-        val editable = node?.isEditable == true
-        node?.recycle()
-        return editable
+
+        // 2. Fallback: walk the other active/focused windows. The active
+        //    window was already checked above; some editors only appear in
+        //    the windows list. Each window.root returns a new instance that
+        //    must be recycled.
+        val roots = mutableListOf<AccessibilityNodeInfo>()
+        try {
+            try {
+                windows?.filter { it.isActive || it.isFocused }?.forEach { window ->
+                    try {
+                        window.root?.let { roots += it }
+                    } catch (_: Exception) {
+                    }
+                }
+            } catch (_: Exception) {
+            }
+            for (root in roots) {
+                try {
+                    if (hasFocusedInputInTree(root)) return true
+                } catch (_: Exception) {
+                }
+            }
+        } finally {
+            roots.forEach {
+                try { it.recycle() } catch (_: Exception) {}
+            }
+        }
+        return false
+    }
+
+    /**
+     * Same definition of "can take text" as the injection path, plus the
+     * ACTION_SET_TEXT capability flag. Keep these two in sync: if injection
+     * can paste there, the bubble should have been visible there.
+     */
+    private fun isTextInputNode(node: AccessibilityNodeInfo): Boolean {
+        val className = node.className?.toString().orEmpty()
+        if (node.isEditable) return true
+        if (className.contains("EditText")) return true
+        if (className.contains("TerminalView")) return true
+        if (node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_SET_TEXT }) return true
+        if (findCustomPasteAction(node) != null) return true
+        return false
+    }
+
+    /** DFS for a focused text-capable node. Caller owns [root]. */
+    private fun hasFocusedInputInTree(root: AccessibilityNodeInfo): Boolean {
+        if (root.isFocused && isTextInputNode(root)) return true
+        // Some toolkits move accessibility focus without input focus.
+        if (root.isAccessibilityFocused && isTextInputNode(root)) return true
+        for (i in 0 until root.childCount) {
+            val child = try { root.getChild(i) } catch (_: Exception) { null } ?: continue
+            try {
+                if (hasFocusedInputInTree(child)) return true
+            } finally {
+                try { child.recycle() } catch (_: Exception) {}
+            }
+        }
+        return false
     }
     override fun onInterrupt() {}
 
     override fun onDestroy() {
         instance = null
+        handler.removeCallbacks(visibilityCheck)
         removeOverlay()
         super.onDestroy()
     }
