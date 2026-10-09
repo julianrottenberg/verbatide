@@ -27,8 +27,15 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Install Android SDK packages
+        # The runner image ships the SDK, and setup-android@v3 fails on
+        # `sdkmanager tools`, so install the packages directly.
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          CMDLINE="$SDK/cmdline-tools"
+          SDKMANAGER="$(find "$CMDLINE" -name sdkmanager -print -quit)"
+          yes | "$SDKMANAGER" --licenses > /dev/null
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace
@@ -74,8 +81,15 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Install Android SDK packages
+        # The runner image ships the SDK, and setup-android@v3 fails on
+        # `sdkmanager tools`, so install the packages directly.
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          CMDLINE="$SDK/cmdline-tools"
+          SDKMANAGER="$(find "$CMDLINE" -name sdkmanager -print -quit)"
+          yes | "$SDKMANAGER" --licenses > /dev/null
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace

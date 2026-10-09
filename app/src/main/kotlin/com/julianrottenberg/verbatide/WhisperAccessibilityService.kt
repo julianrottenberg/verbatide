@@ -707,6 +707,7 @@ class WhisperAccessibilityService : AccessibilityService() {
                 chatModel = ProviderConfig.chatModel(p2),
                 reasoning = PostProcessor.Reasoning.fromKey(prefs().getString("reasoning_effort", "off")),
                 languageHint = languageHint,
+                keepTerms = DictionaryManager.outputTerms(this),
             ) { result ->
                 handler.post {
                     if (result.text != null && result.text.isNotBlank()) {
