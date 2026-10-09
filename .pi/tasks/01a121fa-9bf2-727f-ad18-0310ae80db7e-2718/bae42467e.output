@@ -1,0 +1,60 @@
+
+   Explanation for issues of type "FullBackupContent":
+   Ensures that <data-extraction-rules> and <full-backup-content> files, which
+   configure backup options, are valid.
+
+   https://android-developers.googleblog.com/2015/07/auto-backup-for-apps-made-simple.html
+
+
+The full lint text report is located at:
+  /home/julian/verbatide/app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt
+
+[Incubating] Problems report is available at: file:///home/julian/verbatide/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:lintDebug'.
+> Lint found errors in the project; aborting build.
+  
+  Fix the issues identified by lint, or create a baseline to see only new errors.
+  To create a baseline, run `gradlew updateLintBaseline` after adding the following to the module's build.gradle file:
+  ```
+  android {
+      lint {
+          baseline = file("lint-baseline.xml")
+      }
+  }
+  ```
+  For more details, see https://developer.android.com/studio/write/lint#snapshot
+  
+  Lint found 1 errors, 56 warnings. First failure:
+  
+  /home/julian/verbatide/app/src/main/res/xml/backup_rules.xml:6: Error: Paths are not allowed to contain .. [FullBackupContent]
+      <exclude domain="file" path="../shared_prefs/phonewhisper_secure.xml" />
+                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  
+     Explanation for issues of type "FullBackupContent":
+     Ensures that <data-extraction-rules> and <full-backup-content> files, which
+     configure backup options, are valid.
+  
+     https://android-developers.googleblog.com/2015/07/auto-backup-for-apps-made-simple.html
+  
+  
+  The full lint text report is located at:
+    /home/julian/verbatide/app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.13/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 1m 9s
+53 actionable tasks: 10 executed, 43 up-to-date

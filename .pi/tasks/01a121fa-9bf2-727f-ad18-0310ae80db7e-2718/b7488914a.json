@@ -1,0 +1,28 @@
+{
+  "id": "b7488914a",
+  "name": "Build and test tones feature",
+  "command": "cd /home/julian/verbatide && ls gradlew >/dev/null 2>&1 && ./gradlew :app:assembleDebug :app:testDebugUnitTest 2>&1 | tail -60",
+  "description": "Gradle assembleDebug + unit tests after tones feature and bug fixes",
+  "status": "completed",
+  "outputPath": ".pi/tasks/01a121fa-9bf2-727f-ad18-0310ae80db7e-2718/b7488914a.output",
+  "cwd": "/home/julian/verbatide",
+  "startTime": 1791574285882,
+  "endTime": 1791574296993,
+  "exitCode": 0,
+  "signal": null,
+  "pid": 12754,
+  "bytesWritten": 2843,
+  "isAgent": false,
+  "surviveReload": false,
+  "notified": true,
+  "notifyOnCompletion": true,
+  "triggerOnCompletion": true,
+  "shellPolicy": {
+    "policy": "inherit",
+    "executable": "/bin/sh",
+    "argvPrefix": [
+      "-c"
+    ],
+    "dialect": "posix"
+  }
+}
