@@ -62,6 +62,9 @@ object ModelDownloader {
                 extractTarBz2(tmpFile, outDir)
                 onState(DownloadState.Done)
             } catch (e: Exception) {
+                // A failed download/extract must not leave a partial directory
+                // behind — isInstalled() would treat it as a usable model.
+                modelDir(ctx, model).deleteRecursively()
                 onState(DownloadState.Error(e.message ?: "Unknown error"))
             } finally {
                 tmpFile.delete()

@@ -137,9 +137,10 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
         reasoning: Reasoning = Reasoning.DEFAULT,
         languageHint: String? = null,
         keepTerms: List<String> = emptyList(),
+        toneInstruction: String = "",
         callback: (Result) -> Unit,
     ) {
-        val safePrompt = withKeepTerms(withLanguageGuard(sanitizedPrompt(prompt), languageHint), keepTerms)
+        val safePrompt = withKeepTerms(withLanguageGuard(withTone(sanitizedPrompt(prompt), toneInstruction), languageHint), keepTerms)
         val safeText = sanitizedText(text)
         val messages = JSONArray().apply {
             put(JSONObject().apply {
@@ -200,6 +201,17 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
             terms.joinToString(", ") + "."
     }
 
+
+    /**
+     * Per-app tone instruction (WisprFlow-style). Appended as a style directive
+     * before the language guard, so "never translate" still wins. Empty/blank
+     * leaves the prompt untouched.
+     */
+    fun withTone(prompt: String, toneInstruction: String?): String {
+        val inst = toneInstruction?.trim().orEmpty()
+        if (inst.isEmpty()) return prompt
+        return prompt.rstripTrailing() + "\n\nStyle: $inst"
+    }
     /**
      * Ensures the cleanup prompt keeps the original language.
      *

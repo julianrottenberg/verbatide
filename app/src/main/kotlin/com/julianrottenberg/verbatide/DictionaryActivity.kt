@@ -1,8 +1,5 @@
 package com.julianrottenberg.verbatide
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.graphics.Typeface
 import android.os.Bundle
 import android.text.InputType
@@ -178,7 +175,6 @@ class DictionaryActivity : AppCompatActivity() {
                     enabled = enabledBox.isChecked,
                 )
                 DictionaryManager.upsert(this, entry)
-                (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager) // keep import used
                 recreate()
             }
             .setNegativeButton("Cancel", null)

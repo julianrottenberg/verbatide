@@ -30,7 +30,6 @@ import kotlin.concurrent.thread
 import kotlin.math.abs
 
 class WhisperAccessibilityService : AccessibilityService() {
-
     companion object {
         var instance: WhisperAccessibilityService? = null
         private const val TAG = "PhoneWhisper"
@@ -49,18 +48,29 @@ class WhisperAccessibilityService : AccessibilityService() {
         private const val COLOR_RING = 0xFFE8EAED.toInt()
 
         /** ISO-639-1 → display name, for the cleanup language guard. */
-        private val LANG_NAMES = mapOf(
-            "en" to "English", "de" to "German", "es" to "Spanish", "fr" to "French",
-            "it" to "Italian", "pt" to "Portuguese", "nl" to "Dutch", "pl" to "Polish",
-            "ru" to "Russian", "tr" to "Turkish", "ja" to "Japanese", "ko" to "Korean",
-            "zh" to "Chinese",
-        )
+        private val LANG_NAMES =
+            mapOf(
+                "en" to "English",
+                "de" to "German",
+                "es" to "Spanish",
+                "fr" to "French",
+                "it" to "Italian",
+                "pt" to "Portuguese",
+                "nl" to "Dutch",
+                "pl" to "Polish",
+                "ru" to "Russian",
+                "tr" to "Turkish",
+                "ja" to "Japanese",
+                "ko" to "Korean",
+                "zh" to "Chinese",
+            )
 
         fun langName(code: String): String = LANG_NAMES[code.lowercase()] ?: code
     }
 
     private enum class State { IDLE, RECORDING, TRANSCRIBING }
 
+    @Volatile
     private var state = State.IDLE
         set(value) {
             field = value
@@ -76,14 +86,24 @@ class WhisperAccessibilityService : AccessibilityService() {
     private var audioRecord: AudioRecord? = null
     private var pcmStream: ByteArrayOutputStream? = null
     private val handler = Handler(Looper.getMainLooper())
-    private val hideFeedback = Runnable {
-        feedbackView?.animate()?.alpha(0f)?.setDuration(180)?.withEndAction {
-            feedbackView?.visibility = View.GONE
-        }?.start()
-    }
+    private val hideFeedback =
+        Runnable {
+            feedbackView
+                ?.animate()
+                ?.alpha(0f)
+                ?.setDuration(180)
+                ?.withEndAction {
+                    feedbackView?.visibility = View.GONE
+                }?.start()
+        }
 
     // Local transcription engine (loaded lazily)
+    @Volatile
     private var localTranscriber: LocalTranscriber? = null
+
+    /** Package of the app that was in front when recording stopped — drives per-app tone selection. */
+    @Volatile
+    private var pendingTargetPackage: String? = null
 
     private val dp get() = resources.displayMetrics.density
     private val screenW get() = resources.displayMetrics.widthPixels
@@ -106,16 +126,18 @@ class WhisperAccessibilityService : AccessibilityService() {
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
             AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
-            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED,
+            -> {
                 // Fast path: the event source itself may be the input (many
                 // custom editors — Flutter, Compose, WebView — never surface
                 // FOCUS_INPUT at the root, so check the source first).
                 // NOTE: event.source must be recycled by the caller.
-                val src = try {
-                    event.source
-                } catch (_: Exception) {
-                    null
-                }
+                val src =
+                    try {
+                        event.source
+                    } catch (_: Exception) {
+                        null
+                    }
                 if (src != null) {
                     try {
                         if (isTextInputNode(src) &&
@@ -125,7 +147,10 @@ class WhisperAccessibilityService : AccessibilityService() {
                             return
                         }
                     } finally {
-                        try { src.recycle() } catch (_: Exception) {}
+                        try {
+                            src.recycle()
+                        } catch (_: Exception) {
+                        }
                     }
                 }
                 updateBubbleVisibility()
@@ -138,6 +163,7 @@ class WhisperAccessibilityService : AccessibilityService() {
                     handler.postDelayed(visibilityCheck, 1000)
                 }
             }
+
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
                 // Noisy event — debounce so tree walks don't thrash.
                 scheduleVisibilityCheck(150)
@@ -175,7 +201,12 @@ class WhisperAccessibilityService : AccessibilityService() {
         //    often expose ACTION_SET_TEXT while isEditable is false.
         // NOTE: rootInActiveWindow returns a new instance each call that
         // must be recycled.
-        val activeRoot = try { rootInActiveWindow } catch (_: Exception) { null }
+        val activeRoot =
+            try {
+                rootInActiveWindow
+            } catch (_: Exception) {
+                null
+            }
         if (activeRoot != null) {
             try {
                 try {
@@ -183,7 +214,10 @@ class WhisperAccessibilityService : AccessibilityService() {
                         try {
                             if (isTextInputNode(node)) return true
                         } finally {
-                            try { node.recycle() } catch (_: Exception) {}
+                            try {
+                                node.recycle()
+                            } catch (_: Exception) {
+                            }
                         }
                     }
                 } catch (_: Exception) {
@@ -194,7 +228,10 @@ class WhisperAccessibilityService : AccessibilityService() {
                         try {
                             if (node.isFocused && isTextInputNode(node)) return true
                         } finally {
-                            try { node.recycle() } catch (_: Exception) {}
+                            try {
+                                node.recycle()
+                            } catch (_: Exception) {
+                            }
                         }
                     }
                 } catch (_: Exception) {
@@ -207,7 +244,10 @@ class WhisperAccessibilityService : AccessibilityService() {
                 } catch (_: Exception) {
                 }
             } finally {
-                try { activeRoot.recycle() } catch (_: Exception) {}
+                try {
+                    activeRoot.recycle()
+                } catch (_: Exception) {
+                }
             }
         }
 
@@ -234,7 +274,10 @@ class WhisperAccessibilityService : AccessibilityService() {
             }
         } finally {
             roots.forEach {
-                try { it.recycle() } catch (_: Exception) {}
+                try {
+                    it.recycle()
+                } catch (_: Exception) {
+                }
             }
         }
         return false
@@ -261,15 +304,24 @@ class WhisperAccessibilityService : AccessibilityService() {
         // Some toolkits move accessibility focus without input focus.
         if (root.isAccessibilityFocused && isTextInputNode(root)) return true
         for (i in 0 until root.childCount) {
-            val child = try { root.getChild(i) } catch (_: Exception) { null } ?: continue
+            val child =
+                try {
+                    root.getChild(i)
+                } catch (_: Exception) {
+                    null
+                } ?: continue
             try {
                 if (hasFocusedInputInTree(child)) return true
             } finally {
-                try { child.recycle() } catch (_: Exception) {}
+                try {
+                    child.recycle()
+                } catch (_: Exception) {
+                }
             }
         }
         return false
     }
+
     override fun onInterrupt() {}
 
     override fun onDestroy() {
@@ -279,19 +331,28 @@ class WhisperAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
+    @Synchronized
     private fun initLocalModel() {
         val modelName = prefs().getString("model_name", "") ?: ""
-        if (modelName.isBlank()) {
-            // Auto-detect first available model
-            val models = LocalTranscriber.availableModels(this)
-            if (models.isNotEmpty()) {
-                Log.i(TAG, "Auto-detected model: ${models.first()}")
-                localTranscriber = LocalTranscriber.create(this, models.first())
+        val created =
+            if (modelName.isBlank()) {
+                // Auto-detect first available model
+                val models = LocalTranscriber.availableModels(this)
+                if (models.isNotEmpty()) {
+                    Log.i(TAG, "Auto-detected model: ${models.first()}")
+                    LocalTranscriber.create(this, models.first())
+                } else {
+                    null
+                }
+            } else {
+                LocalTranscriber.create(this, modelName)
             }
-        } else {
-            localTranscriber = LocalTranscriber.create(this, modelName)
-        }
-        if (localTranscriber != null) {
+        // Swap first, then release the old recognizer so native buffers don't
+        // pile up across repeated reloadModel() calls.
+        val old = localTranscriber
+        localTranscriber = created
+        old?.release()
+        if (created != null) {
             Log.i(TAG, "Local transcription ready")
         } else {
             Log.i(TAG, "No local model found, will use API")
@@ -299,7 +360,9 @@ class WhisperAccessibilityService : AccessibilityService() {
     }
 
     /** Reload local model (called from MainActivity when settings change) */
-    fun reloadModel() { thread { initLocalModel() } }
+    fun reloadModel() {
+        thread { initLocalModel() }
+    }
 
     // --- Overlay ---
 
@@ -310,45 +373,56 @@ class WhisperAccessibilityService : AccessibilityService() {
         val pad = (PAD_DP * dp).toInt()
         val margin = (MARGIN_DP * dp).toInt()
 
-        val ring = ProgressBar(this).apply {
-            isIndeterminate = true
-            indeterminateTintList = ColorStateList.valueOf(COLOR_RING)
-            visibility = View.GONE
-        }
+        val ring =
+            ProgressBar(this).apply {
+                isIndeterminate = true
+                indeterminateTintList = ColorStateList.valueOf(COLOR_RING)
+                visibility = View.GONE
+            }
 
-        val img = ImageView(this).apply {
-            setImageResource(R.drawable.ic_mic)
-            scaleType = ImageView.ScaleType.CENTER_INSIDE
-            setPadding(pad, pad, pad, pad)
-            background = circle(COLOR_IDLE)
-        }
+        val img =
+            ImageView(this).apply {
+                setImageResource(R.drawable.ic_mic)
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                setPadding(pad, pad, pad, pad)
+                background = circle(COLOR_IDLE)
+            }
 
-        val overlay = FrameLayout(this).apply {
-            addView(ring, FrameLayout.LayoutParams(ringSize, ringSize, Gravity.CENTER))
-            addView(img, FrameLayout.LayoutParams(buttonSize, buttonSize, Gravity.CENTER))
-        }
+        val overlay =
+            FrameLayout(this).apply {
+                addView(ring, FrameLayout.LayoutParams(ringSize, ringSize, Gravity.CENTER))
+                addView(img, FrameLayout.LayoutParams(buttonSize, buttonSize, Gravity.CENTER))
+            }
 
-        val params = WindowManager.LayoutParams(
-            ringSize, ringSize,
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = screenW - ringSize - margin
-            y = screenH / 2 - ringSize / 2
-        }
+        val params =
+            WindowManager
+                .LayoutParams(
+                    ringSize,
+                    ringSize,
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                    PixelFormat.TRANSLUCENT,
+                ).apply {
+                    gravity = Gravity.TOP or Gravity.START
+                    x = screenW - ringSize - margin
+                    y = screenH / 2 - ringSize / 2
+                }
 
-        var startX = 0; var startY = 0
-        var touchX = 0f; var touchY = 0f
+        var startX = 0
+        var startY = 0
+        var touchX = 0f
+        var touchY = 0f
 
         overlay.setOnTouchListener { v, ev ->
             when (ev.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    startX = params.x; startY = params.y
-                    touchX = ev.rawX; touchY = ev.rawY
+                    startX = params.x
+                    startY = params.y
+                    touchX = ev.rawX
+                    touchY = ev.rawY
                     true
                 }
+
                 MotionEvent.ACTION_MOVE -> {
                     params.x = startX + (ev.rawX - touchX).toInt()
                     params.y = startY + (ev.rawY - touchY).toInt()
@@ -359,13 +433,18 @@ class WhisperAccessibilityService : AccessibilityService() {
                     }
                     true
                 }
+
                 MotionEvent.ACTION_UP -> {
                     val moved = abs(ev.rawX - touchX) + abs(ev.rawY - touchY)
                     if (moved < TAP_THRESHOLD_DP * dp) {
                         onTap()
                     } else {
-                        params.x = if (params.x + ringSize / 2 > screenW / 2)
-                            screenW - ringSize - margin else margin
+                        params.x =
+                            if (params.x + ringSize / 2 > screenW / 2) {
+                                screenW - ringSize - margin
+                            } else {
+                                margin
+                            }
                         wm.updateViewLayout(v, params)
                         feedbackLayoutParams?.let {
                             positionFeedback(it, params)
@@ -374,28 +453,34 @@ class WhisperAccessibilityService : AccessibilityService() {
                     }
                     true
                 }
-                else -> false
+
+                else -> {
+                    false
+                }
             }
         }
 
-        val feedback = TextView(this).apply {
-            textSize = 13f
-            setTextColor(0xFFFFFFFF.toInt())
-            setPadding((12 * dp).toInt(), (8 * dp).toInt(), (12 * dp).toInt(), (8 * dp).toInt())
-            background = pill(COLOR_FEEDBACK_BG)
-            alpha = 0f
-            visibility = View.GONE
-        }
+        val feedback =
+            TextView(this).apply {
+                textSize = 13f
+                setTextColor(0xFFFFFFFF.toInt())
+                setPadding((12 * dp).toInt(), (8 * dp).toInt(), (12 * dp).toInt(), (8 * dp).toInt())
+                background = pill(COLOR_FEEDBACK_BG)
+                alpha = 0f
+                visibility = View.GONE
+            }
 
-        val feedbackParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-        }
+        val feedbackParams =
+            WindowManager
+                .LayoutParams(
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                    PixelFormat.TRANSLUCENT,
+                ).apply {
+                    gravity = Gravity.TOP or Gravity.START
+                }
         positionFeedback(feedbackParams, params)
 
         wm.addView(overlay, params)
@@ -424,15 +509,18 @@ class WhisperAccessibilityService : AccessibilityService() {
         feedbackLayoutParams = null
     }
 
-    private fun circle(color: Int) = GradientDrawable().apply {
-        shape = GradientDrawable.OVAL; setColor(color)
-    }
+    private fun circle(color: Int) =
+        GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(color)
+        }
 
-    private fun pill(color: Int) = GradientDrawable().apply {
-        shape = GradientDrawable.RECTANGLE
-        cornerRadius = 16 * dp
-        setColor(color)
-    }
+    private fun pill(color: Int) =
+        GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = 16 * dp
+            setColor(color)
+        }
 
     private fun setAppearance(color: Int) {
         handler.post { button?.background = circle(color) }
@@ -446,7 +534,7 @@ class WhisperAccessibilityService : AccessibilityService() {
 
     private fun positionFeedback(
         feedbackParams: WindowManager.LayoutParams,
-        bubbleParams: WindowManager.LayoutParams
+        bubbleParams: WindowManager.LayoutParams,
     ) {
         val margin = (MARGIN_DP * dp).toInt()
         val offset = (FEEDBACK_OFFSET_DP * dp).toInt()
@@ -454,7 +542,10 @@ class WhisperAccessibilityService : AccessibilityService() {
         feedbackParams.y = maxOf(margin, bubbleParams.y - margin)
     }
 
-    private fun showFeedback(text: String, durationMs: Long = 2000) {
+    private fun showFeedback(
+        text: String,
+        durationMs: Long = 2000,
+    ) {
         handler.post {
             val view = feedbackView ?: return@post
             val bubbleParams = layoutParams ?: return@post
@@ -469,18 +560,30 @@ class WhisperAccessibilityService : AccessibilityService() {
             view.animate().cancel()
             view.visibility = View.VISIBLE
             view.alpha = 0f
-            view.animate().alpha(1f).setDuration(120).start()
+            view
+                .animate()
+                .alpha(1f)
+                .setDuration(120)
+                .start()
             handler.postDelayed(hideFeedback, durationMs)
         }
     }
 
     private fun startPulse() {
         button?.let {
-            it.animate().alpha(0.4f).setDuration(500).withEndAction {
-                it.animate().alpha(1f).setDuration(500).withEndAction {
-                    if (state == State.RECORDING) startPulse()
+            it
+                .animate()
+                .alpha(0.4f)
+                .setDuration(500)
+                .withEndAction {
+                    it
+                        .animate()
+                        .alpha(1f)
+                        .setDuration(500)
+                        .withEndAction {
+                            if (state == State.RECORDING) startPulse()
+                        }.start()
                 }.start()
-            }.start()
         }
     }
 
@@ -501,22 +604,52 @@ class WhisperAccessibilityService : AccessibilityService() {
 
     private fun startRecording() {
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
-            != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            toast("Grant audio permission in Verbatide"); return
+            != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            toast("Grant audio permission in Verbatide")
+            return
         }
 
-        val bufSize = AudioRecord.getMinBufferSize(
-            SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
-        )
-        audioRecord = try {
-            AudioRecord(
-                MediaRecorder.AudioSource.MIC, SAMPLE_RATE,
-                AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufSize
+        val bufSize =
+            AudioRecord.getMinBufferSize(
+                SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
             )
-        } catch (_: SecurityException) { toast("Audio permission denied"); return }
+        if (bufSize <= 0) {
+            toast("Audio capture not available on this device")
+            return
+        }
+        audioRecord =
+            try {
+                AudioRecord(
+                    MediaRecorder.AudioSource.MIC,
+                    SAMPLE_RATE,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    bufSize,
+                )
+            } catch (
+                _: SecurityException,
+            ) {
+                toast("Audio permission denied")
+                return
+            } catch (_: IllegalArgumentException) {
+                toast("Audio init failed")
+                return
+            }
 
         pcmStream = ByteArrayOutputStream()
-        audioRecord!!.startRecording()
+        try {
+            audioRecord!!.startRecording()
+        } catch (_: IllegalStateException) {
+            // Mic held by another app or a call — fail soft, don't crash.
+            audioRecord?.release()
+            audioRecord = null
+            pcmStream = null
+            toast("Microphone is busy")
+            return
+        }
         state = State.RECORDING
         setBusy(false)
         setAppearance(COLOR_RECORDING)
@@ -544,13 +677,14 @@ class WhisperAccessibilityService : AccessibilityService() {
         showFeedback("Cancelled", 1500)
     }
 
-    private val cancelTimeout = Runnable {
-        if (state == State.TRANSCRIBING) {
-            Log.w(TAG, "Transcription timed out")
-            cancelTranscription()
-            toast("Request timed out")
+    private val cancelTimeout =
+        Runnable {
+            if (state == State.TRANSCRIBING) {
+                Log.w(TAG, "Transcription timed out")
+                cancelTranscription()
+                toast("Request timed out")
+            }
         }
-    }
 
     private fun stopAndTranscribe() {
         state = State.TRANSCRIBING
@@ -562,10 +696,25 @@ class WhisperAccessibilityService : AccessibilityService() {
         audioRecord?.release()
         audioRecord = null
 
+        // Capture which app is in front — drives per-app tone selection.
+        // Same recycle-after-use pattern as the other rootInActiveWindow callers.
+        pendingTargetPackage =
+            try {
+                rootInActiveWindow?.let { w ->
+                    val p = w.packageName?.toString()
+                    w.recycle()
+                    p
+                }
+            } catch (_: Exception) {
+                null
+            }
         val pcm = pcmStream?.toByteArray() ?: ByteArray(0)
         pcmStream = null
 
-        if (pcm.isEmpty()) { reset("No audio captured"); return }
+        if (pcm.isEmpty()) {
+            reset("No audio captured")
+            return
+        }
 
         val useLocal = prefs().getBoolean("use_local", true)
         val local = localTranscriber
@@ -577,7 +726,10 @@ class WhisperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun transcribeLocal(pcm: ByteArray, transcriber: LocalTranscriber) {
+    private fun transcribeLocal(
+        pcm: ByteArray,
+        transcriber: LocalTranscriber,
+    ) {
         thread {
             try {
                 // Convert 16-bit PCM bytes to float samples
@@ -642,15 +794,24 @@ class WhisperAccessibilityService : AccessibilityService() {
         when (selectedStt) {
             Provider.FAL -> {
                 val apiKey = SecurePrefs.getSttApiKey(this)
-                if (apiKey.isBlank()) { handler.removeCallbacks(cancelTimeout); reset("Set STT API key (fal.ai) in Verbatide"); return }
+                if (apiKey.isBlank()) {
+                    handler.removeCallbacks(cancelTimeout)
+                    reset("Set STT API key (fal.ai) in Verbatide")
+                    return
+                }
                 FalTranscriber.transcribe(wav, apiKey, sttLanguage) { r ->
                     handler.removeCallbacks(cancelTimeout)
                     onResult(r.text, r.language, r.error)
                 }
             }
+
             else -> {
                 val apiKey = SecurePrefs.getSttApiKey(this)
-                if (apiKey.isBlank()) { handler.removeCallbacks(cancelTimeout); reset("Set STT API key in Verbatide"); return }
+                if (apiKey.isBlank()) {
+                    handler.removeCallbacks(cancelTimeout)
+                    reset("Set STT API key in Verbatide")
+                    return
+                }
                 TranscriberClient.transcribe(
                     wavData = wav,
                     apiKey = apiKey,
@@ -666,7 +827,11 @@ class WhisperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun handleTranscriptionResult(rawText: String?, languageHint: String? = null, provider: String = "") {
+    private fun handleTranscriptionResult(
+        rawText: String?,
+        languageHint: String? = null,
+        provider: String = "",
+    ) {
         if (rawText.isNullOrBlank()) {
             handler.post {
                 toast("No speech detected")
@@ -689,7 +854,10 @@ class WhisperAccessibilityService : AccessibilityService() {
                 handler.post {
                     toast("Post-processing needs API key. Using raw text.")
                     injectText(text)
-                    HistoryManager.append(this@WhisperAccessibilityService, HistoryEntry(System.currentTimeMillis(), text, provider, languageHint))
+                    HistoryManager.append(
+                        this@WhisperAccessibilityService,
+                        HistoryEntry(System.currentTimeMillis(), text, provider, languageHint),
+                    )
                     state = State.IDLE
                     setBusy(false)
                     setAppearance(COLOR_IDLE)
@@ -708,14 +876,21 @@ class WhisperAccessibilityService : AccessibilityService() {
                 reasoning = PostProcessor.Reasoning.fromKey(prefs().getString("reasoning_effort", "off")),
                 languageHint = languageHint,
                 keepTerms = DictionaryManager.outputTerms(this),
+                toneInstruction = ToneManager.instructionFor(this@WhisperAccessibilityService, pendingTargetPackage),
             ) { result ->
                 handler.post {
                     if (result.text != null && result.text.isNotBlank()) {
                         injectText(result.text)
-                        HistoryManager.append(this@WhisperAccessibilityService, HistoryEntry(System.currentTimeMillis(), result.text, provider, languageHint))
+                        HistoryManager.append(
+                            this@WhisperAccessibilityService,
+                            HistoryEntry(System.currentTimeMillis(), result.text, provider, languageHint),
+                        )
                     } else {
                         injectText(text, feedback = "Cleanup failed — raw copied to clipboard", feedbackDurationMs = 3000)
-                        HistoryManager.append(this@WhisperAccessibilityService, HistoryEntry(System.currentTimeMillis(), text, provider, languageHint))
+                        HistoryManager.append(
+                            this@WhisperAccessibilityService,
+                            HistoryEntry(System.currentTimeMillis(), text, provider, languageHint),
+                        )
                     }
                     state = State.IDLE
                     setBusy(false)
@@ -725,7 +900,10 @@ class WhisperAccessibilityService : AccessibilityService() {
         } else {
             handler.post {
                 injectText(text)
-                HistoryManager.append(this@WhisperAccessibilityService, HistoryEntry(System.currentTimeMillis(), text, provider, languageHint))
+                HistoryManager.append(
+                    this@WhisperAccessibilityService,
+                    HistoryEntry(System.currentTimeMillis(), text, provider, languageHint),
+                )
                 state = State.IDLE
                 setBusy(false)
                 setAppearance(COLOR_IDLE)
@@ -745,7 +923,7 @@ class WhisperAccessibilityService : AccessibilityService() {
     private fun injectText(
         text: String,
         feedback: String? = "Copied to clipboard",
-        feedbackDurationMs: Long = 2000
+        feedbackDurationMs: Long = 2000,
     ) {
         val clip = ClipData.newPlainText("phonewhisper", text)
         (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
@@ -784,7 +962,7 @@ class WhisperAccessibilityService : AccessibilityService() {
                 val root = window.root ?: return@forEach
                 Log.i(
                     TAG,
-                    "Window root: type=${window.type} active=${window.isActive} focused=${window.isFocused} package=${root.packageName} class=${root.className}"
+                    "Window root: type=${window.type} active=${window.isActive} focused=${window.isFocused} package=${root.packageName} class=${root.className}",
                 )
                 collectInjectionCandidates(root, candidates)
                 root.recycle()
@@ -795,7 +973,7 @@ class WhisperAccessibilityService : AccessibilityService() {
 
     private fun collectInjectionCandidates(
         root: AccessibilityNodeInfo,
-        out: MutableList<AccessibilityNodeInfo>
+        out: MutableList<AccessibilityNodeInfo>,
     ) {
         root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.let { out += it }
         root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { out += it }
@@ -804,7 +982,7 @@ class WhisperAccessibilityService : AccessibilityService() {
 
     private fun collectPotentialTargets(
         node: AccessibilityNodeInfo,
-        out: MutableList<AccessibilityNodeInfo>
+        out: MutableList<AccessibilityNodeInfo>,
     ) {
         if (isPotentialInjectionTarget(node)) {
             out += AccessibilityNodeInfo.obtain(node)
@@ -840,7 +1018,10 @@ class WhisperAccessibilityService : AccessibilityService() {
         return score
     }
 
-    private fun tryInjectIntoNode(node: AccessibilityNodeInfo, text: String): Boolean {
+    private fun tryInjectIntoNode(
+        node: AccessibilityNodeInfo,
+        text: String,
+    ): Boolean {
         logNode("Trying node", node)
 
         node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
@@ -862,12 +1043,13 @@ class WhisperAccessibilityService : AccessibilityService() {
             val replacementStart = minOf(start, end)
             val replacementEnd = maxOf(start, end)
             val updated = current.replaceRange(replacementStart, replacementEnd, text)
-            val args = Bundle().apply {
-                putCharSequence(
-                    AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-                    updated
-                )
-            }
+            val args =
+                Bundle().apply {
+                    putCharSequence(
+                        AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                        updated,
+                    )
+                }
             val setTextOk = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
             Log.i(TAG, "ACTION_SET_TEXT => $setTextOk")
             if (setTextOk) return true
@@ -881,16 +1063,25 @@ class WhisperAccessibilityService : AccessibilityService() {
             action.label?.toString()?.contains("paste", ignoreCase = true) == true
         }
 
-    private fun logNode(prefix: String, node: AccessibilityNodeInfo) {
-        val actions = node.actionList.joinToString { action ->
-            action.label?.toString() ?: action.id.toString()
-        }
+    private fun logNode(
+        prefix: String,
+        node: AccessibilityNodeInfo,
+    ) {
+        val actions =
+            node.actionList.joinToString { action ->
+                action.label?.toString() ?: action.id.toString()
+            }
+        // Never log node.text — it holds whatever the user typed into other
+        // apps (chats, mails, forms). Length is enough for debugging.
         Log.i(
             TAG,
-            "$prefix package=${node.packageName} class=${node.className} focused=${node.isFocused} editable=${node.isEditable} text=${node.text} desc=${node.contentDescription} actions=[$actions]"
+            "$prefix package=${node.packageName} class=${node.className} focused=${node.isFocused} editable=${node.isEditable} textChars=${node.text?.length ?: 0} desc=${node.contentDescription} actions=[$actions]",
         )
     }
 
     private fun prefs() = getSharedPreferences("phonewhisper", MODE_PRIVATE)
-    private fun toast(msg: String) { handler.post { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show() } }
+
+    private fun toast(msg: String) {
+        handler.post { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show() }
+    }
 }

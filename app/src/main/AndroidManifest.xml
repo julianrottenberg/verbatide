@@ -4,6 +4,13 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Make launcher apps visible to the per-app tone picker on Android 11+ -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
     <application
         android:allowBackup="false"
         android:fullBackupContent="@xml/backup_rules"
@@ -35,6 +42,12 @@
             android:name=".DictionaryActivity"
             android:exported="false"
             android:label="Dictionary"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
+            android:name=".TonesActivity"
+            android:exported="false"
+            android:label="App tones"
             android:parentActivityName=".MainActivity" />
 
         <service
