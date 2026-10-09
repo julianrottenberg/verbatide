@@ -1,0 +1,7 @@
+PWD=/home/julian/verbatide
+which: no java in (/home/julian/.pi-lens/pip-tools/bin:/app/bin:/usr/bin:/home/julian/.opencode/bin:/home/julian/.local/bin:/home/linuxbrew/.linuxbrew/bin)
+which: no javac in (/home/julian/.pi-lens/pip-tools/bin:/app/bin:/usr/bin:/home/julian/.opencode/bin:/home/julian/.local/bin:/home/linuxbrew/.linuxbrew/bin)
+which: no gradle in (/home/julian/.pi-lens/pip-tools/bin:/app/bin:/usr/bin:/home/julian/.opencode/bin:/home/julian/.local/bin:/home/linuxbrew/.linuxbrew/bin)
+/bin/sh: line 1: java: command not found
+ANDROID_HOME=
+JAVA_HOME=
