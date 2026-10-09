@@ -657,6 +657,7 @@ class WhisperAccessibilityService : AccessibilityService() {
                     sttUrl = ProviderConfig.sttUrl(p),
                     sttModel = ProviderConfig.sttModel(p),
                     language = sttLanguage,
+                    vocabulary = DictionaryManager.outputTerms(this),
                 ) { result ->
                     handler.removeCallbacks(cancelTimeout)
                     onResult(result.text, result.language, result.error)
@@ -665,8 +666,8 @@ class WhisperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun handleTranscriptionResult(text: String?, languageHint: String? = null, provider: String = "") {
-        if (text.isNullOrBlank()) {
+    private fun handleTranscriptionResult(rawText: String?, languageHint: String? = null, provider: String = "") {
+        if (rawText.isNullOrBlank()) {
             handler.post {
                 toast("No speech detected")
                 state = State.IDLE
@@ -675,6 +676,10 @@ class WhisperAccessibilityService : AccessibilityService() {
             }
             return
         }
+
+        // Dictionary replacements run on every transcript (cloud or local), so they
+        // hold even when the provider ignored the vocabulary hint.
+        val text = DictionaryManager.applyReplacements(this, rawText)
 
         val usePostProcessing = prefs().getBoolean("use_post_processing", false)
         val apiKey = SecurePrefs.getChatApiKey(this)

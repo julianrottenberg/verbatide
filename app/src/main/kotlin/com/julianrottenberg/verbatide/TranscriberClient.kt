@@ -38,12 +38,18 @@ object TranscriberClient {
     const val MAX_WAV_BYTES = 25 * 1024 * 1024 // OpenAI's typical 25 MB audio cap
     const val MAX_RESPONSE_CHARS = 20_000
 
+    /**
+     * [vocabulary] is the dictionary's output spellings. It is sent only where the
+     * endpoint documents a hint (see [DictionaryManager.promptStyleFor]); elsewhere
+     * the post-transcription replacement pass is the only dictionary effect.
+     */
     fun transcribe(
         wavData: ByteArray,
         apiKey: String,
         sttUrl: String = "https://api.openai.com/v1/audio/transcriptions",
         sttModel: String = "whisper-1",
         language: String? = null,
+        vocabulary: List<String> = emptyList(),
         callback: (Result) -> Unit,
     ) {
         if (wavData.size > MAX_WAV_BYTES) {
@@ -79,6 +85,18 @@ object TranscriberClient {
             }
         }
 
+        // Dictionary vocabulary, in the encoding each endpoint documents.
+        // Whisper-family: one `prompt` string. Mistral: repeated `context_bias`
+        // fields, one per phrase (a single comma-joined value biases nothing).
+        val style = DictionaryManager.promptStyleFor(sttUrl)
+        val promptText = if (style == DictionaryManager.PromptStyle.PROMPT_FIELD) {
+            DictionaryManager.vocabularyPrompt(vocabulary).ifBlank { null }
+        } else null
+        if (promptText != null) bodyBuilder.addFormDataPart("prompt", promptText)
+        if (style == DictionaryManager.PromptStyle.CONTEXT_BIAS) {
+            DictionaryManager.contextBiasTerms(vocabulary).forEach { bodyBuilder.addFormDataPart("context_bias", it) }
+        }
+
         val body = bodyBuilder.build()
 
         val request = Request.Builder()
@@ -110,7 +128,10 @@ object TranscriberClient {
                     return
                 }
                 val parsed = parseResponse(body)
-                val capped = parsed.text?.take(MAX_RESPONSE_CHARS)
+                // Whisper can echo the prompt back on silence; never let it reach the user.
+                val capped = parsed.text
+                    ?.take(MAX_RESPONSE_CHARS)
+                    ?.let { DictionaryManager.stripPromptEcho(it, promptText) }
                 callback(if (capped != null) Result(capped, null) else parsed)
             }
         })

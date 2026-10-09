@@ -15,7 +15,7 @@ Excerpt from `HANDOFF.md` §2 (authoritative — this page is a readable mirror)
   - `ProviderConfig.kt` — `Provider` enum (`OPENAI/GROQ/OPENROUTER/TOGETHER/VENICE/MISTRAL/NANOGPT/FAL/CUSTOM`), split `stt_provider`/`chat_provider` prefs + legacy `provider` fallback, `Defaults` per provider, `sttUrl/sttModel/chatUrl/chatModel` resolvers, `sttModelOverride`/`chatModelOverride` keys + `save*Override`
   - `SecurePrefs.kt` — `EncryptedSharedPreferences` (`phonewhisper_secure`) for `stt_api_key`/`chat_api_key`/`api_key`, plain `phonewhisper` for the rest, `MasterKey AES256_GCM`
   - `TranscriptionHistory.kt` — `filesDir/transcription_history.json`, capped by `50 MB / 90 days`, `HistoryManager`
-  - `Dictionary.kt` / `DictionaryActivity.kt` / `HistoryActivity.kt` — user dictionary (prompt hint for Whisper-family STT)
+  - `Dictionary.kt` / `DictionaryActivity.kt` / `HistoryActivity.kt` — user dictionary (replacements on every transcript; spellings sent as STT hint to OpenAI/Groq/Mistral only)
   - `MainActivity.kt` — all settings UI, `registerForActivityResult` SAF backup, provider picker, language picker, reasoning picker, model override rows, history/dictionary launchers
   - `WavWriter.kt`, `ModelDownloader.kt`, `LocalTranscriber.kt`
 - `settings.gradle.kts` — `rootProject.name = "verbatide"`

@@ -11,7 +11,7 @@
 - **Local STT** via sherpa-onnx (offline), **cloud STT/chat** with split providers.
 - **Providers:** OpenAI, Groq, OpenRouter, Together, Venice, Mistral (voxtral-mini-latest), NanoGPT, fal.ai Wizper, Custom OpenAI-compatible.
 - **Transcription language** pin (prevents drift-to-English), per-provider **model overrides** (`stt_model_override`/`chat_model_override`).
-- **History** (`TranscriptionHistory.kt`, capped 50 MB / 90 days) + **Dictionary** (prompt hint for STT).
+- **History** (`TranscriptionHistory.kt`, capped 50 MB / 90 days) + **Dictionary** (replacements on every transcript; STT hint for OpenAI/Groq/Mistral).
 - **Security:** `EncryptedSharedPreferences` for `stt_api_key`/`chat_api_key`, `allowBackup=false`, `network_security_config` loopback-only.
 - **Rebrand:** Verbatide `com.julianrottenberg.verbatide`, APK `verbatide-vX.Y.Z.apk`, attribution to Phone Whisper by kafkasl.
 
