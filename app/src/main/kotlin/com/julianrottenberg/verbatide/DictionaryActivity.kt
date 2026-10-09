@@ -51,7 +51,7 @@ class DictionaryActivity : AppCompatActivity() {
         root.addView(titleBar)
 
         val subtitle = TextView(this).apply {
-            text = "Adds words/phrases the STT should recognise. Sent to providers that support a prompt hint."
+            text = "Applied to every transcript. The spellings are also sent as a hint to OpenAI, Groq and Mistral."
             textSize = 13f
             setTextColor(0xFF666666.toInt())
             setPadding(0, 0, 0, dp(12))
