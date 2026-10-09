@@ -132,7 +132,7 @@ object TranscriberClient {
                 val capped = parsed.text
                     ?.take(MAX_RESPONSE_CHARS)
                     ?.let { DictionaryManager.stripPromptEcho(it, promptText) }
-                callback(if (capped != null) Result(capped, null) else parsed)
+                callback(if (capped != null) Result(capped, null, parsed.language) else parsed)
             }
         })
     }

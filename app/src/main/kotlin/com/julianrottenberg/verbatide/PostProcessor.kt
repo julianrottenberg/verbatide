@@ -136,9 +136,10 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
         chatModel: String = "gpt-4o-mini",
         reasoning: Reasoning = Reasoning.DEFAULT,
         languageHint: String? = null,
+        keepTerms: List<String> = emptyList(),
         callback: (Result) -> Unit,
     ) {
-        val safePrompt = withLanguageGuard(sanitizedPrompt(prompt), languageHint)
+        val safePrompt = withKeepTerms(withLanguageGuard(sanitizedPrompt(prompt), languageHint), keepTerms)
         val safeText = sanitizedText(text)
         val messages = JSONArray().apply {
             put(JSONObject().apply {
@@ -186,6 +187,17 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
                 callback(if (capped != null) Result(capped, null) else parsed)
             }
         })
+    }
+
+    /**
+     * Dictionary spellings the cleanup model must keep as written. Empty list
+     * leaves the prompt unchanged.
+     */
+    fun withKeepTerms(prompt: String, terms: List<String>): String {
+        if (terms.isEmpty()) return prompt
+        return prompt.rstripTrailing() +
+            "\n\nKeep these spellings exactly as written when they appear: " +
+            terms.joinToString(", ") + "."
     }
 
     /**

@@ -97,4 +97,15 @@ class PostProcessorTest {
         val out = PostProcessor.withLanguageGuard("Fix punctuation.", null)
         assertTrue(out.contains("same language", ignoreCase = true))
     }
+
+    @Test fun `keep terms appended to prompt`() {
+        val out = PostProcessor.withKeepTerms("Fix punctuation.", listOf("Kubernetes", "Schrödinger"))
+        assertTrue(out.startsWith("Fix punctuation."))
+        assertTrue(out.contains("Keep these spellings exactly as written", ignoreCase = true))
+        assertTrue(out.contains("Kubernetes, Schrödinger"))
+    }
+
+    @Test fun `keep terms empty list leaves prompt unchanged`() {
+        assertEquals("Fix punctuation.", PostProcessor.withKeepTerms("Fix punctuation.", emptyList()))
+    }
 }
