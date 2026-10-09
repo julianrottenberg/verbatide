@@ -68,6 +68,7 @@ class MainActivity : AppCompatActivity() {
         }
     private val historyLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { /* refresh on return */ }
     private val dictionaryLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { /* refresh on return */ }
+    private val tonesLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { /* refresh on return */ }
 
     private val modelRows = mutableMapOf<String, ModelRowViews>()
     private val promptRows = mutableMapOf<String, PromptRowViews>()
@@ -1118,6 +1119,14 @@ class MainActivity : AppCompatActivity() {
             dictionaryLauncher.launch(android.content.Intent(this, DictionaryActivity::class.java))
         }
 
+        val tonesRow = settingsRow("App tones", run {
+            val n = ToneManager.load(this).size
+            if (n == 0) "Same tone everywhere — tap to customize per app"
+            else "$n app${if (n == 1) "" else "s"} customized"
+        }) {
+            tonesLauncher.launch(android.content.Intent(this, TonesActivity::class.java))
+        }
+
         val historyLimitRow = settingsRow(
             "Retention limit",
             "${prefs().getInt(HistoryManager.KEY_HISTORY_MAX_MB, HistoryManager.DEF_MAX_MB)} MB · ${prefs().getInt(HistoryManager.KEY_HISTORY_MAX_DAYS, HistoryManager.DEF_MAX_DAYS)} days — tap to change",
@@ -1183,6 +1192,7 @@ class MainActivity : AppCompatActivity() {
         container.addView(enabledRow)
         container.addView(browseRow)
         container.addView(dictRow)
+        container.addView(tonesRow)
         container.addView(historyLimitRow)
         container.addView(clearRow)
 

@@ -108,4 +108,26 @@ class PostProcessorTest {
     @Test fun `keep terms empty list leaves prompt unchanged`() {
         assertEquals("Fix punctuation.", PostProcessor.withKeepTerms("Fix punctuation.", emptyList()))
     }
+
+    @Test fun `tone instruction appended as style directive`() {
+        val out = PostProcessor.withTone("Fix punctuation.", "Rewrite in a formal, polite register.")
+        assertTrue(out.startsWith("Fix punctuation."))
+        assertTrue(out.contains("\n\nStyle: Rewrite in a formal, polite register."))
+    }
+
+    @Test fun `tone blank or null leaves prompt unchanged`() {
+        assertEquals("Fix punctuation.", PostProcessor.withTone("Fix punctuation.", null))
+        assertEquals("Fix punctuation.", PostProcessor.withTone("Fix punctuation.", ""))
+        assertEquals("Fix punctuation.", PostProcessor.withTone("Fix punctuation.", "   "))
+    }
+
+    @Test fun `tone composes with language guard and keep terms in process order`() {
+        // Same composition as PostProcessor.process: tone -> language guard -> keep terms.
+        var p = PostProcessor.withTone("Fix punctuation.", "Be casual.")
+        p = PostProcessor.withLanguageGuard(p, "German")
+        p = PostProcessor.withKeepTerms(p, listOf("Verbatide"))
+        assertTrue(p.contains("Style: Be casual."))
+        assertTrue(p.contains("never translate", ignoreCase = true))
+        assertTrue(p.contains("Verbatide"))
+    }
 }
