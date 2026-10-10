@@ -20,9 +20,9 @@ data class Tone(
 
 object ToneManager {
     private const val PREFS = "app_tones"
-    private const val KEY_MAPPINGS = "mappings"
-    private const val KEY_CUSTOM_TONES = "custom_tones"
-    private const val KEY_OVERRIDES = "instruction_overrides"
+    const val KEY_MAPPINGS = "mappings"
+    const val KEY_CUSTOM_TONES = "custom_tones"
+    const val KEY_OVERRIDES = "instruction_overrides"
 
     val TONES =
         listOf(

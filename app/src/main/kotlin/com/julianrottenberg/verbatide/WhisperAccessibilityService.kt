@@ -86,6 +86,13 @@ class WhisperAccessibilityService : AccessibilityService() {
     private var audioRecord: AudioRecord? = null
     private var pcmStream: ByteArrayOutputStream? = null
     private val handler = Handler(Looper.getMainLooper())
+    // Last text this service injected, so "delete that" knows what to remove.
+    // Scoped to the app it went into and to a time window, because the field may
+    // have been edited or the user may have moved to another app since.
+    private var lastInsertedText: String = ""
+    private var lastInsertedPackage: String = ""
+    private var lastInsertedAt: Long = 0L
+    private val deleteWindowMs = 15 * 60 * 1000L
     private val hideFeedback =
         Runnable {
             feedbackView
@@ -844,7 +851,39 @@ class WhisperAccessibilityService : AccessibilityService() {
 
         // Dictionary replacements run on every transcript (cloud or local), so they
         // hold even when the provider ignored the vocabulary hint.
-        val text = DictionaryManager.applyReplacements(this, rawText)
+        val dictText = DictionaryManager.applyReplacements(this, rawText)
+
+        // Voice commands are handled here, not in the cleanup prompt, so they
+        // behave the same whatever prompt the user has stored.
+        val commandsOn = prefs().getBoolean(VoiceCommands.KEY_ENABLED, VoiceCommands.DEF_ENABLED)
+        when (val cmd = if (commandsOn) VoiceCommands.parse(dictText) else null) {
+            VoiceCommands.Command.DeleteLast -> {
+                handler.post {
+                    val ok = deleteLastInsertion()
+                    toast(if (ok) "Deleted last dictation" else "Nothing to delete")
+                    state = State.IDLE
+                    setBusy(false)
+                    setAppearance(COLOR_IDLE)
+                }
+                return
+            }
+
+            is VoiceCommands.Command.Break -> {
+                // A bare "new paragraph" / "new line" inserts that break; it is
+                // not dictation, so it gets no history entry.
+                handler.post {
+                    injectText(cmd.text, feedback = null)
+                    state = State.IDLE
+                    setBusy(false)
+                    setAppearance(COLOR_IDLE)
+                }
+                return
+            }
+
+            null -> Unit
+        }
+
+        val text = VoiceCommands.inlineIfEnabled(commandsOn, dictText)
 
         val usePostProcessing = prefs().getBoolean("use_post_processing", false)
         val apiKey = SecurePrefs.getChatApiKey(this)
@@ -933,10 +972,12 @@ class WhisperAccessibilityService : AccessibilityService() {
         Log.i(TAG, "Injecting text into ${candidates.size} candidate node(s)")
 
         var injected = false
+        var injectedPackage = ""
         try {
             for (candidate in candidates) {
                 if (tryInjectIntoNode(candidate, text)) {
                     injected = true
+                    injectedPackage = candidate.packageName?.toString().orEmpty()
                     break
                 }
             }
@@ -944,7 +985,64 @@ class WhisperAccessibilityService : AccessibilityService() {
             candidates.forEach { it.recycle() }
         }
 
+        if (injected) {
+            lastInsertedText = text
+            lastInsertedPackage = injectedPackage
+            lastInsertedAt = System.currentTimeMillis()
+        }
         Log.i(TAG, if (injected) "Text injection action reported success" else "No injection action succeeded; clipboard fallback only")
+    }
+
+    /**
+     * Removes the last injected text from the focused field. Returns false when
+     * there is nothing safe to remove: no previous injection, a different app, a
+     * stale window, or the text is gone because the user edited it.
+     */
+    private fun deleteLastInsertion(): Boolean {
+        val needle = lastInsertedText
+        if (needle.isBlank()) return false
+        if (System.currentTimeMillis() - lastInsertedAt > deleteWindowMs) return false
+
+        val candidates = findInjectionCandidates()
+        try {
+            for (node in candidates) {
+                if (lastInsertedPackage.isNotEmpty() &&
+                    node.packageName?.toString() != lastInsertedPackage
+                ) {
+                    continue
+                }
+                val current = node.text?.toString().orEmpty()
+                val idx = current.lastIndexOf(needle)
+                if (idx < 0) continue
+
+                val updated = current.removeRange(idx, idx + needle.length)
+                val args =
+                    Bundle().apply {
+                        putCharSequence(
+                            AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                            updated,
+                        )
+                    }
+                val ok = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+                Log.i(TAG, "Delete last dictation => $ok")
+                if (ok) {
+                    val caret = idx.coerceIn(0, updated.length)
+                    val selection =
+                        Bundle().apply {
+                            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, caret)
+                            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, caret)
+                        }
+                    node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, selection)
+                    lastInsertedText = ""
+                    lastInsertedPackage = ""
+                    lastInsertedAt = 0L
+                    return true
+                }
+            }
+        } finally {
+            candidates.forEach { it.recycle() }
+        }
+        return false
     }
 
     private fun findInjectionCandidates(): List<AccessibilityNodeInfo> {

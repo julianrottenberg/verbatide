@@ -24,7 +24,7 @@ data class DictEntry(
 
 object DictionaryManager {
     private const val FILENAME = "dictionary.json"
-    private const val KEY_DICT_ENABLED = "dictionary_enabled"
+    const val KEY_DICT_ENABLED = "dictionary_enabled"
     private const val PREFS = "phonewhisper"
     private val WHITESPACE = Regex("\\s+")
 
