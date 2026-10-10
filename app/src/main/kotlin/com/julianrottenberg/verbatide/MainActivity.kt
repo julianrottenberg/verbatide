@@ -13,8 +13,8 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.widget.*
-import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.google.android.material.button.MaterialButton
@@ -24,10 +24,10 @@ import com.google.android.material.radiobutton.MaterialRadioButton
 import java.io.File
 
 class MainActivity : AppCompatActivity() {
-
     private lateinit var statusSubtitle: TextView
     private lateinit var audioRowSub: TextView
     private lateinit var accRowSub: TextView
+
     // Legacy single-key row — hidden since v0.6.0, kept for refresh() compat.
     private lateinit var keyRowSub: TextView
     private lateinit var keyRowTitle: TextView
@@ -96,11 +96,12 @@ class MainActivity : AppCompatActivity() {
 
         val root = vertical(0, 0)
 
-        val header = TextView(this).apply {
-            text = "Verbatide"
-            textSize = 32f
-            setPadding(dp(24), dp(64), dp(24), dp(24))
-        }
+        val header =
+            TextView(this).apply {
+                text = "Verbatide"
+                textSize = 32f
+                setPadding(dp(24), dp(64), dp(24), dp(24))
+            }
         root.addView(header)
 
         val statusRow = settingsRow("Status", "Checking...")
@@ -110,33 +111,37 @@ class MainActivity : AppCompatActivity() {
         // --- Setup ---
         root.addView(sectionHeader("Setup"))
 
-        val audioRow = settingsRow("Audio permission", "Checking...") {
-            if (!hasPerm(Manifest.permission.RECORD_AUDIO)) {
-                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+        val audioRow =
+            settingsRow("Audio permission", "Checking...") {
+                if (!hasPerm(Manifest.permission.RECORD_AUDIO)) {
+                    ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+                }
             }
-        }
         audioRowSub = audioRow.findViewWithTag("subtitle")
         root.addView(audioRow)
 
-        val accRow = settingsRow("Accessibility service", "Checking...") {
-            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-        }
+        val accRow =
+            settingsRow("Accessibility service", "Checking...") {
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
         accRowSub = accRow.findViewWithTag("subtitle")
         root.addView(accRow)
 
         // --- Engine (local vs cloud toggle) ---
         val isCloud = !prefs().getBoolean("use_local", true)
 
-        val cloudSwitch = MaterialSwitch(this).apply {
-            isChecked = isCloud
-            isClickable = false
-        }
-        val cloudRow = settingsRow("Use cloud transcription", "On-device by default", cloudSwitch) {
-            val newCloud = !cloudSwitch.isChecked
-            prefs().edit().putBoolean("use_local", !newCloud).apply()
-            cloudSwitch.isChecked = newCloud
-            refresh()
-        }
+        val cloudSwitch =
+            MaterialSwitch(this).apply {
+                isChecked = isCloud
+                isClickable = false
+            }
+        val cloudRow =
+            settingsRow("Use cloud transcription", "On-device by default", cloudSwitch) {
+                val newCloud = !cloudSwitch.isChecked
+                prefs().edit().putBoolean("use_local", !newCloud).apply()
+                cloudSwitch.isChecked = newCloud
+                refresh()
+            }
         root.addView(cloudRow)
 
         // --- Transcription language (cloud only; Whisper auto-translates to
@@ -153,15 +158,17 @@ class MainActivity : AppCompatActivity() {
             providerContainer.addView(buildProviderRow(provider, isStt = true))
         }
         // Inline summary row so collapsed state is still informative
-        val providerSummaryRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(24), dp(4), dp(24), dp(8))
-        }
-        providerSummarySub = TextView(this).apply {
-            tag = "provider_summary"
-            textSize = 12f
-            setTextColor(attrColor(android.R.attr.textColorSecondary))
-        }
+        val providerSummaryRow =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(dp(24), dp(4), dp(24), dp(8))
+            }
+        providerSummarySub =
+            TextView(this).apply {
+                tag = "provider_summary"
+                textSize = 12f
+                setTextColor(attrColor(android.R.attr.textColorSecondary))
+            }
         providerSummaryRow.addView(providerSummarySub)
         providerContainer.addView(providerSummaryRow)
 
@@ -202,20 +209,22 @@ class MainActivity : AppCompatActivity() {
         root.addView(sectionHeader("Post-Processing"))
 
         val isPostProcessing = prefs().getBoolean("use_post_processing", false)
-        val postProcessSwitch = MaterialSwitch(this).apply {
-            isChecked = isPostProcessing
-            isClickable = false
-        }
-        val postProcessRow = settingsRow(
-            "Cleanup transcript",
-            "Fix grammar & punctuation via chat API",
-            postProcessSwitch,
-        ) {
-            val newVal = !postProcessSwitch.isChecked
-            prefs().edit().putBoolean("use_post_processing", newVal).apply()
-            postProcessSwitch.isChecked = newVal
-            refresh()
-        }
+        val postProcessSwitch =
+            MaterialSwitch(this).apply {
+                isChecked = isPostProcessing
+                isClickable = false
+            }
+        val postProcessRow =
+            settingsRow(
+                "Cleanup transcript",
+                "Fix grammar & punctuation via chat API",
+                postProcessSwitch,
+            ) {
+                val newVal = !postProcessSwitch.isChecked
+                prefs().edit().putBoolean("use_post_processing", newVal).apply()
+                postProcessSwitch.isChecked = newVal
+                refresh()
+            }
         root.addView(postProcessRow)
 
         promptContainer = vertical(0)
@@ -239,15 +248,17 @@ class MainActivity : AppCompatActivity() {
         for (provider in ProviderConfig.chatProviders) {
             chatProviderContainer.addView(buildProviderRow(provider, isStt = false))
         }
-        val chatSummaryRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(24), dp(4), dp(24), dp(8))
-        }
-        chatSummarySub = TextView(this).apply {
-            tag = "chat_summary"
-            textSize = 12f
-            setTextColor(attrColor(android.R.attr.textColorSecondary))
-        }
+        val chatSummaryRow =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(dp(24), dp(4), dp(24), dp(8))
+            }
+        chatSummarySub =
+            TextView(this).apply {
+                tag = "chat_summary"
+                textSize = 12f
+                setTextColor(attrColor(android.R.attr.textColorSecondary))
+            }
         chatSummaryRow.addView(chatSummarySub)
         chatProviderContainer.addView(chatSummaryRow)
 
@@ -278,12 +289,16 @@ class MainActivity : AppCompatActivity() {
 
         // --- Backup & restore ---
         root.addView(sectionHeader("Backup & restore"))
-        root.addView(settingsRow("Export settings", "Save endpoints, prompts & preferences to a file") {
-            exportLauncher.launch("verbatide-backup.json")
-        })
-        root.addView(settingsRow("Import settings", "Restore from a previously exported file") {
-            importLauncher.launch(arrayOf("application/json", "text/*", "application/octet-stream"))
-        })
+        root.addView(
+            settingsRow("Export settings", "Save endpoints, prompts & preferences to a file") {
+                exportLauncher.launch("verbatide-backup.json")
+            },
+        )
+        root.addView(
+            settingsRow("Import settings", "Restore from a previously exported file") {
+                importLauncher.launch(arrayOf("application/json", "text/*", "application/octet-stream"))
+            },
+        )
 
         // --- Transcription history ---
         root.addView(buildHistorySection())
@@ -316,7 +331,11 @@ class MainActivity : AppCompatActivity() {
         refresh()
     }
 
-    override fun onRequestPermissionsResult(c: Int, p: Array<String>, r: IntArray) {
+    override fun onRequestPermissionsResult(
+        c: Int,
+        p: Array<String>,
+        r: IntArray,
+    ) {
         super.onRequestPermissionsResult(c, p, r)
         refresh()
     }
@@ -325,28 +344,37 @@ class MainActivity : AppCompatActivity() {
     // Provider rows
     // -----------------------------------------------------------------------
 
-    private fun buildProviderRow(provider: Provider, isStt: Boolean = true): View {
-        val radio = MaterialRadioButton(this).apply {
-            isClickable = false
-            buttonTintList = ColorStateList.valueOf(attrColor(com.google.android.material.R.attr.colorPrimary))
-        }
+    private fun buildProviderRow(
+        provider: Provider,
+        isStt: Boolean = true,
+    ): View {
+        val radio =
+            MaterialRadioButton(this).apply {
+                isClickable = false
+                buttonTintList = ColorStateList.valueOf(attrColor(com.google.android.material.R.attr.colorPrimary))
+            }
         val defaults = ProviderConfig.defaultsFor(provider)
-        val subtitle = when (provider) {
-            Provider.OPENAI -> "api.openai.com · whisper-1 · gpt-4o-mini"
-            Provider.GROQ -> "api.groq.com · ${defaults.sttModel} · ${defaults.chatModel}"
-            Provider.OPENROUTER -> "openrouter.ai · ${defaults.sttModel} · ${defaults.chatModel}"
-            Provider.TOGETHER -> "api.together.ai · ${defaults.sttModel} · ${defaults.chatModel}"
-            Provider.VENICE -> "api.venice.ai · ${defaults.sttModel} · ${defaults.chatModel}"
-            Provider.MISTRAL -> "api.mistral.ai · voxtral-mini-latest · mistral-small"
-            Provider.NANOGPT -> "api.nano-gpt.com · Whisper-Large-V3 · gpt-4o-mini"
-            Provider.FAL -> "queue.fal.run · wizper (STT only)"
-            Provider.CUSTOM -> if (isStt) "Your own STT endpoint" else "Your own chat endpoint"
-        }
-        val row = settingsRow(provider.displayName, subtitle, radio) {
-            if (isStt) ProviderConfig.saveSttProvider(prefs(), provider)
-            else ProviderConfig.saveChatProvider(prefs(), provider)
-            refresh()
-        }
+        val subtitle =
+            when (provider) {
+                Provider.OPENAI -> "api.openai.com · whisper-1 · gpt-4o-mini"
+                Provider.GROQ -> "api.groq.com · ${defaults.sttModel} · ${defaults.chatModel}"
+                Provider.OPENROUTER -> "openrouter.ai · ${defaults.sttModel} · ${defaults.chatModel}"
+                Provider.TOGETHER -> "api.together.ai · ${defaults.sttModel} · ${defaults.chatModel}"
+                Provider.VENICE -> "api.venice.ai · ${defaults.sttModel} · ${defaults.chatModel}"
+                Provider.MISTRAL -> "api.mistral.ai · voxtral-mini-latest · mistral-small"
+                Provider.NANOGPT -> "api.nano-gpt.com · Whisper-Large-V3 · gpt-4o-mini"
+                Provider.FAL -> "queue.fal.run · wizper (STT only)"
+                Provider.CUSTOM -> if (isStt) "Your own STT endpoint" else "Your own chat endpoint"
+            }
+        val row =
+            settingsRow(provider.displayName, subtitle, radio) {
+                if (isStt) {
+                    ProviderConfig.saveSttProvider(prefs(), provider)
+                } else {
+                    ProviderConfig.saveChatProvider(prefs(), provider)
+                }
+                refresh()
+            }
         // Retag so we can refresh selection state — key on (provider, side).
         val subtitleView = row.findViewWithTag<TextView>("subtitle")
         providerRows[provider to isStt] = ProviderRowViews(radio, subtitleView)
@@ -354,10 +382,17 @@ class MainActivity : AppCompatActivity() {
         return row
     }
 
-    private fun refreshProviderRow(provider: Provider, isStt: Boolean = true) {
+    private fun refreshProviderRow(
+        provider: Provider,
+        isStt: Boolean = true,
+    ) {
         val views = providerRows[provider to isStt] ?: return
-        views.radio.isChecked = if (isStt) ProviderConfig.selectedStt(prefs()) == provider
-                                else ProviderConfig.selectedChat(prefs()) == provider
+        views.radio.isChecked =
+            if (isStt) {
+                ProviderConfig.selectedStt(prefs()) == provider
+            } else {
+                ProviderConfig.selectedChat(prefs()) == provider
+            }
     }
 
     private fun refreshProviderRows() {
@@ -366,8 +401,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun providerCustomSttUrlTitle() = "STT endpoint"
+
     private fun providerCustomSttModelTitle() = "STT model"
+
     private fun providerCustomChatUrlTitle() = "Chat endpoint"
+
     private fun providerCustomChatModelTitle() = "Chat model"
 
     private fun providerCustomSttUrlSubtitle(): String {
@@ -388,41 +426,62 @@ class MainActivity : AppCompatActivity() {
         val def = ProviderConfig.defaultsFor(ProviderConfig.selectedStt(prefs())).sttModel
         return if (cur == def) "Default ($def) — tap to change" else "$cur — tap to change (default $def)"
     }
+
     private fun chatModelDisplay(): String {
         val cur = ProviderConfig.chatModel(prefs())
         val def = ProviderConfig.defaultsFor(ProviderConfig.selectedChat(prefs())).chatModel
         return if (cur == def) "Default ($def) — tap to change" else "$cur — tap to change (default $def)"
     }
+
     private fun promptSttModelOverride() {
         val cur = ProviderConfig.sttModel(prefs())
-        val input = EditText(this).apply { setText(cur); hint = "e.g. voxtral-mini-2602" }
-        android.app.AlertDialog.Builder(this)
+        val input =
+            EditText(this).apply {
+                setText(cur)
+                hint = "e.g. voxtral-mini-2602"
+            }
+        android.app.AlertDialog
+            .Builder(this)
             .setTitle("STT model (override)")
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
                 val v = input.text.toString().trim()
-                if (v.isBlank()) ProviderConfig.saveSttModelOverride(prefs(), "")
-                else ProviderConfig.saveSttModelOverride(prefs(), v)
+                if (v.isBlank()) {
+                    ProviderConfig.saveSttModelOverride(prefs(), "")
+                } else {
+                    ProviderConfig.saveSttModelOverride(prefs(), v)
+                }
                 refresh()
-            }
-            .setNegativeButton("Clear (use default)") { _, _ -> ProviderConfig.saveSttModelOverride(prefs(), ""); refresh() }
-            .setNeutralButton("Cancel", null)
+            }.setNegativeButton("Clear (use default)") { _, _ ->
+                ProviderConfig.saveSttModelOverride(prefs(), "")
+                refresh()
+            }.setNeutralButton("Cancel", null)
             .show()
     }
+
     private fun promptChatModelOverride() {
         val cur = ProviderConfig.chatModel(prefs())
-        val input = EditText(this).apply { setText(cur); hint = "e.g. mistral-small-latest" }
-        android.app.AlertDialog.Builder(this)
+        val input =
+            EditText(this).apply {
+                setText(cur)
+                hint = "e.g. mistral-small-latest"
+            }
+        android.app.AlertDialog
+            .Builder(this)
             .setTitle("Chat model (override)")
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
                 val v = input.text.toString().trim()
-                if (v.isBlank()) ProviderConfig.saveChatModelOverride(prefs(), "")
-                else ProviderConfig.saveChatModelOverride(prefs(), v)
+                if (v.isBlank()) {
+                    ProviderConfig.saveChatModelOverride(prefs(), "")
+                } else {
+                    ProviderConfig.saveChatModelOverride(prefs(), v)
+                }
                 refresh()
-            }
-            .setNegativeButton("Clear (use default)") { _, _ -> ProviderConfig.saveChatModelOverride(prefs(), ""); refresh() }
-            .setNeutralButton("Cancel", null)
+            }.setNegativeButton("Clear (use default)") { _, _ ->
+                ProviderConfig.saveChatModelOverride(prefs(), "")
+                refresh()
+            }.setNeutralButton("Cancel", null)
             .show()
     }
 
@@ -446,33 +505,38 @@ class MainActivity : AppCompatActivity() {
     // -----------------------------------------------------------------------
 
     private fun buildModelRow(model: Model): View {
-        val radio = MaterialRadioButton(this).apply {
-            isClickable = false
-            buttonTintList = ColorStateList.valueOf(attrColor(com.google.android.material.R.attr.colorPrimary))
-        }
-        val dlBtn = MaterialButton(this, null, com.google.android.material.R.attr.materialIconButtonStyle).apply {
-            text = "↓"
-            textSize = 18f
-            setTextColor(attrColor(com.google.android.material.R.attr.colorPrimary))
-        }
+        val radio =
+            MaterialRadioButton(this).apply {
+                isClickable = false
+                buttonTintList = ColorStateList.valueOf(attrColor(com.google.android.material.R.attr.colorPrimary))
+            }
+        val dlBtn =
+            MaterialButton(this, null, com.google.android.material.R.attr.materialIconButtonStyle).apply {
+                text = "↓"
+                textSize = 18f
+                setTextColor(attrColor(com.google.android.material.R.attr.colorPrimary))
+            }
 
-        val progress = LinearProgressIndicator(this).apply {
-            visibility = View.GONE
-            layoutParams = LinearLayout.LayoutParams(LP_MATCH, dp(4)).apply { topMargin = dp(8) }
-        }
+        val progress =
+            LinearProgressIndicator(this).apply {
+                visibility = View.GONE
+                layoutParams = LinearLayout.LayoutParams(LP_MATCH, dp(4)).apply { topMargin = dp(8) }
+            }
 
-        val rightContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(dlBtn)
-            addView(radio)
-        }
+        val rightContainer =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(dlBtn)
+                addView(radio)
+            }
 
-        val row = settingsRow(
-            model.name,
-            "${model.quality} · ${model.sizeMb} MB",
-            rightContainer,
-        ) { onModelAction(model) }
+        val row =
+            settingsRow(
+                model.name,
+                "${model.quality} · ${model.sizeMb} MB",
+                rightContainer,
+            ) { onModelAction(model) }
 
         val textContainer = row.getChildAt(0) as LinearLayout
         textContainer.addView(progress)
@@ -553,10 +617,11 @@ class MainActivity : AppCompatActivity() {
     // -----------------------------------------------------------------------
 
     private fun buildPromptRow(preset: PromptPreset): View {
-        val radio = MaterialRadioButton(this).apply {
-            isClickable = false
-            buttonTintList = ColorStateList.valueOf(attrColor(com.google.android.material.R.attr.colorPrimary))
-        }
+        val radio =
+            MaterialRadioButton(this).apply {
+                isClickable = false
+                buttonTintList = ColorStateList.valueOf(attrColor(com.google.android.material.R.attr.colorPrimary))
+            }
 
         val row = settingsRow(preset.title, preset.subtitle, radio) { selectPrompt(preset.key) }
 
@@ -566,10 +631,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun selectPrompt(key: String) {
-        val prompt = when (key) {
-            "custom" -> customPrompt()
-            else -> promptPresets().firstOrNull { it.key == key }?.prompt
-        } ?: return
+        val prompt =
+            when (key) {
+                "custom" -> customPrompt()
+                else -> promptPresets().firstOrNull { it.key == key }?.prompt
+            } ?: return
         prefs().edit().putString("post_processing_prompt", prompt).apply()
         refreshPromptRows()
         refresh()
@@ -578,10 +644,11 @@ class MainActivity : AppCompatActivity() {
     private fun refreshPromptRow(preset: PromptPreset) {
         val views = promptRows[preset.key] ?: return
         val current = currentPrompt()
-        val active = when (preset.key) {
-            "custom" -> current != PostProcessor.DEV_PROMPT && current != PostProcessor.SIMPLE_PROMPT
-            else -> current == preset.prompt
-        }
+        val active =
+            when (preset.key) {
+                "custom" -> current != PostProcessor.DEV_PROMPT && current != PostProcessor.SIMPLE_PROMPT
+                else -> current == preset.prompt
+            }
         views.radio.isChecked = active
         views.subtitle.text = if (preset.key == "custom") customPromptSummary() else preset.subtitle
     }
@@ -632,53 +699,86 @@ class MainActivity : AppCompatActivity() {
         customChatUrlSub.text = providerCustomChatUrlSubtitle()
         customChatModelSub.text = providerCustomChatModelSubtitle()
         // keep override rows in sync when provider changes
-        (findViewById<View>(android.R.id.content)?.findViewWithTag<LinearLayout>("sttModelOverrideRow")?.findViewWithTag<TextView>("subtitle"))?.let { it.text = sttModelDisplay() }
-        (findViewById<View>(android.R.id.content)?.findViewWithTag<LinearLayout>("chatModelOverrideRow")?.findViewWithTag<TextView>("subtitle"))?.let { it.text = chatModelDisplay() }
+        (
+            findViewById<View>(
+                android.R.id.content,
+            )?.findViewWithTag<LinearLayout>("sttModelOverrideRow")?.findViewWithTag<TextView>("subtitle")
+        )?.let {
+            it.text =
+                sttModelDisplay()
+        }
+        (
+            findViewById<View>(
+                android.R.id.content,
+            )?.findViewWithTag<LinearLayout>("chatModelOverrideRow")?.findViewWithTag<TextView>("subtitle")
+        )?.let {
+            it.text =
+                chatModelDisplay()
+        }
 
         // API key rows — per side
-        sttKeyRowTitle.text = when (selectedStt) {
-            Provider.GROQ -> "Groq STT key"
-            Provider.OPENROUTER -> "OpenRouter STT key"
-            Provider.TOGETHER -> "Together AI STT key"
-            Provider.FAL -> "fal.ai key"
-            Provider.CUSTOM -> "STT API key"
-            else -> "OpenAI STT key"
-        }
+        sttKeyRowTitle.text =
+            when (selectedStt) {
+                Provider.GROQ -> "Groq STT key"
+                Provider.OPENROUTER -> "OpenRouter STT key"
+                Provider.TOGETHER -> "Together AI STT key"
+                Provider.FAL -> "fal.ai key"
+                Provider.CUSTOM -> "STT API key"
+                else -> "OpenAI STT key"
+            }
         val sttKey = SecurePrefs.getSttApiKey(this)
-        sttKeyRowSub.text = if (sttKey.isBlank()) "Tap to set" else if (sttKey.length > 7) "${sttKey.take(3)}...${sttKey.takeLast(4)}" else "***"
+        sttKeyRowSub.text =
+            if (sttKey.isBlank()) {
+                "Tap to set"
+            } else if (sttKey.length > 7) {
+                "${sttKey.take(3)}...${sttKey.takeLast(4)}"
+            } else {
+                "***"
+            }
 
-        chatKeyRowTitle.text = when (selectedChat) {
-            Provider.GROQ -> "Groq cleanup key"
-            Provider.OPENROUTER -> "OpenRouter cleanup key"
-            Provider.TOGETHER -> "Together AI cleanup key"
-            Provider.CUSTOM -> "Cleanup API key"
-            else -> "OpenAI cleanup key"
-        }
+        chatKeyRowTitle.text =
+            when (selectedChat) {
+                Provider.GROQ -> "Groq cleanup key"
+                Provider.OPENROUTER -> "OpenRouter cleanup key"
+                Provider.TOGETHER -> "Together AI cleanup key"
+                Provider.CUSTOM -> "Cleanup API key"
+                else -> "OpenAI cleanup key"
+            }
         val chatKey = SecurePrefs.getChatApiKey(this)
-        chatKeyRowSub.text = if (chatKey.isBlank()) "Tap to set" else if (chatKey.length > 7) "${chatKey.take(3)}...${chatKey.takeLast(4)}" else "***"
+        chatKeyRowSub.text =
+            if (chatKey.isBlank()) {
+                "Tap to set"
+            } else if (chatKey.length > 7) {
+                "${chatKey.take(3)}...${chatKey.takeLast(4)}"
+            } else {
+                "***"
+            }
 
         // Legacy single key row — title reflects legacy provider (kept hidden)
         val selectedProvider = ProviderConfig.selected(prefs())
-        keyRowTitle.text = when (selectedProvider) {
-            Provider.GROQ -> "Groq API key"
-            Provider.OPENROUTER -> "OpenRouter API key"
-            Provider.TOGETHER -> "Together AI API key"
-            Provider.FAL -> "fal.ai key"
-            Provider.CUSTOM -> "API key"
-            else -> "OpenAI API key"
-        }
+        keyRowTitle.text =
+            when (selectedProvider) {
+                Provider.GROQ -> "Groq API key"
+                Provider.OPENROUTER -> "OpenRouter API key"
+                Provider.TOGETHER -> "Together AI API key"
+                Provider.FAL -> "fal.ai key"
+                Provider.CUSTOM -> "API key"
+                else -> "OpenAI API key"
+            }
         val apiKey = SecurePrefs.getApiKey(this)
-        keyRowSub.text = when {
-            apiKey.isBlank() -> "Tap to set"
-            apiKey.length > 7 -> "${apiKey.take(3)}...${apiKey.takeLast(4)}"
-            else -> "***"
-        }
+        keyRowSub.text =
+            when {
+                apiKey.isBlank() -> "Tap to set"
+                apiKey.length > 7 -> "${apiKey.take(3)}...${apiKey.takeLast(4)}"
+                else -> "***"
+            }
 
         promptRowSub.text = currentPrompt()
 
         val cur = prefs().getString("model_name", "") ?: ""
         if (cur.isBlank() || !File(filesDir, "models/$cur").exists()) {
-            MODEL_CATALOG.firstOrNull { ModelDownloader.isInstalled(this, it) }
+            MODEL_CATALOG
+                .firstOrNull { ModelDownloader.isInstalled(this, it) }
                 ?.let { selectModel(it.archive) }
         }
 
@@ -689,8 +789,11 @@ class MainActivity : AppCompatActivity() {
 
         statusSubtitle.text = if (ready) "Ready — tap the overlay dot to dictate" else "Setup required"
         statusSubtitle.setTextColor(
-            if (ready) attrColor(com.google.android.material.R.attr.colorPrimary)
-            else attrColor(android.R.attr.textColorSecondary),
+            if (ready) {
+                attrColor(com.google.android.material.R.attr.colorPrimary)
+            } else {
+                attrColor(android.R.attr.textColorSecondary)
+            },
         )
 
         refreshAllCards()
@@ -704,28 +807,33 @@ class MainActivity : AppCompatActivity() {
     // Single-key shim kept hidden; split keys are the real rows.
     private fun promptApiKey(isStt: Boolean = true) { // isStt: false = chat STT/Cleanup
         val provider = if (isStt) ProviderConfig.selectedStt(prefs()) else ProviderConfig.selectedChat(prefs())
-        val hint = when (provider) {
-            Provider.GROQ -> "gsk_..."
-            Provider.OPENROUTER -> "sk-or-..."
-            Provider.TOGETHER -> "tgp_..."
-            Provider.FAL -> "fal key — see https://fal.ai/dashboard/keys"
-            else -> "sk-..."
-        }
+        val hint =
+            when (provider) {
+                Provider.GROQ -> "gsk_..."
+                Provider.OPENROUTER -> "sk-or-..."
+                Provider.TOGETHER -> "tgp_..."
+                Provider.FAL -> "fal key — see https://fal.ai/dashboard/keys"
+                else -> "sk-..."
+            }
         val outer = this
-        val input = EditText(this).apply {
-            this.hint = hint
-            setText(if (isStt) SecurePrefs.getSttApiKey(outer) else SecurePrefs.getChatApiKey(outer))
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-        }
-        android.app.AlertDialog.Builder(this)
+        val input =
+            EditText(this).apply {
+                this.hint = hint
+                setText(if (isStt) SecurePrefs.getSttApiKey(outer) else SecurePrefs.getChatApiKey(outer))
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
+        android.app.AlertDialog
+            .Builder(this)
             .setTitle("${provider.displayName} ${if (isStt) "STT" else "cleanup"} key")
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
-                if (isStt) SecurePrefs.putSttApiKey(outer, input.text.toString())
-                else SecurePrefs.putChatApiKey(outer, input.text.toString())
+                if (isStt) {
+                    SecurePrefs.putSttApiKey(outer, input.text.toString())
+                } else {
+                    SecurePrefs.putChatApiKey(outer, input.text.toString())
+                }
                 refresh()
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
@@ -733,37 +841,41 @@ class MainActivity : AppCompatActivity() {
     // backwards compat if the hidden row is ever tapped via search/toast).
     private fun promptSingleApiKey() {
         val provider = ProviderConfig.selected(prefs())
-        val hint = when (provider) {
-            Provider.GROQ -> "gsk_..."
-            Provider.OPENROUTER -> "sk-or-..."
-            Provider.TOGETHER -> "tgp_..."
-            Provider.FAL -> "fal key"
-            else -> "sk-..."
-        }
+        val hint =
+            when (provider) {
+                Provider.GROQ -> "gsk_..."
+                Provider.OPENROUTER -> "sk-or-..."
+                Provider.TOGETHER -> "tgp_..."
+                Provider.FAL -> "fal key"
+                else -> "sk-..."
+            }
         val outer = this
-        val input = EditText(this).apply {
-            this.hint = hint
-            setText(SecurePrefs.getApiKey(outer))
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-        }
-        android.app.AlertDialog.Builder(this)
+        val input =
+            EditText(this).apply {
+                this.hint = hint
+                setText(SecurePrefs.getApiKey(outer))
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
+        android.app.AlertDialog
+            .Builder(this)
             .setTitle("${provider.displayName} API key")
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
                 SecurePrefs.putApiKey(outer, input.text.toString())
                 refresh()
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun promptCustomSttEndpoint() {
-        val input = EditText(this).apply {
-            hint = "https://api.example.com/v1/audio/transcriptions"
-            setText(ProviderConfig.customSttUrl(prefs()))
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
-        }
-        android.app.AlertDialog.Builder(this)
+        val input =
+            EditText(this).apply {
+                hint = "https://api.example.com/v1/audio/transcriptions"
+                setText(ProviderConfig.customSttUrl(prefs()))
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+            }
+        android.app.AlertDialog
+            .Builder(this)
             .setTitle("Custom STT endpoint")
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
@@ -778,34 +890,36 @@ class MainActivity : AppCompatActivity() {
                 }
                 ProviderConfig.saveCustom(prefs(), sttUrl = raw)
                 refresh()
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun promptCustomSttModel() {
-        val input = EditText(this).apply {
-            hint = "whisper-large-v3"
-            setText(ProviderConfig.customSttModel(prefs()))
-        }
-        android.app.AlertDialog.Builder(this)
+        val input =
+            EditText(this).apply {
+                hint = "whisper-large-v3"
+                setText(ProviderConfig.customSttModel(prefs()))
+            }
+        android.app.AlertDialog
+            .Builder(this)
             .setTitle("Custom STT model")
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
                 ProviderConfig.saveCustom(prefs(), sttModel = input.text.toString())
                 refresh()
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun promptCustomChatEndpoint() {
-        val input = EditText(this).apply {
-            hint = "https://api.example.com/v1/chat/completions"
-            setText(ProviderConfig.customChatUrl(prefs()))
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
-        }
-        android.app.AlertDialog.Builder(this)
+        val input =
+            EditText(this).apply {
+                hint = "https://api.example.com/v1/chat/completions"
+                setText(ProviderConfig.customChatUrl(prefs()))
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+            }
+        android.app.AlertDialog
+            .Builder(this)
             .setTitle("Custom chat endpoint")
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
@@ -820,55 +934,56 @@ class MainActivity : AppCompatActivity() {
                 }
                 ProviderConfig.saveCustom(prefs(), chatUrl = raw)
                 refresh()
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun promptCustomChatModel() {
-        val input = EditText(this).apply {
-            hint = "llama-3.3-70b-versatile"
-            setText(ProviderConfig.customChatModel(prefs()))
-        }
-        android.app.AlertDialog.Builder(this)
+        val input =
+            EditText(this).apply {
+                hint = "llama-3.3-70b-versatile"
+                setText(ProviderConfig.customChatModel(prefs()))
+            }
+        android.app.AlertDialog
+            .Builder(this)
             .setTitle("Custom chat model")
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
                 ProviderConfig.saveCustom(prefs(), chatModel = input.text.toString())
                 refresh()
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun promptPostProcessing() {
-        val input = EditText(this).apply {
-            hint = "Prompt"
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
-            minLines = 3
-            gravity = Gravity.TOP or Gravity.START
-            setText(currentPrompt())
-        }
-        android.app.AlertDialog.Builder(this)
+        val input =
+            EditText(this).apply {
+                hint = "Prompt"
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                minLines = 3
+                gravity = Gravity.TOP or Gravity.START
+                setText(currentPrompt())
+            }
+        android.app.AlertDialog
+            .Builder(this)
             .setTitle("Edit current prompt")
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
                 val text = input.text.toString().trim()
                 val finalPrompt = if (text.isBlank()) PostProcessor.DEFAULT_PROMPT else text
-                prefs().edit()
+                prefs()
+                    .edit()
                     .putString("custom_post_processing_prompt", finalPrompt)
                     .putString("post_processing_prompt", finalPrompt)
                     .apply()
                 refresh()
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
     // --- Reasoning effort ---
 
-    private fun currentReasoning(): PostProcessor.Reasoning =
-        PostProcessor.Reasoning.fromKey(prefs().getString("reasoning_effort", "off"))
+    private fun currentReasoning(): PostProcessor.Reasoning = PostProcessor.Reasoning.fromKey(prefs().getString("reasoning_effort", "off"))
 
     private fun currentReasoningLabel(): String {
         val r = currentReasoning()
@@ -879,41 +994,44 @@ class MainActivity : AppCompatActivity() {
         val options = PostProcessor.Reasoning.entries
         val labels = options.map { it.label }.toTypedArray()
         val current = options.indexOf(currentReasoning()).coerceAtLeast(0)
-        android.app.AlertDialog.Builder(this)
+        android.app.AlertDialog
+            .Builder(this)
             .setTitle("Reasoning effort")
             .setSingleChoiceItems(labels, current) { dialog, which ->
                 val selected = options[which]
                 prefs().edit().putString("reasoning_effort", selected.key).apply()
                 dialog.dismiss()
                 refresh()
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
     // --- Transcription language ---
 
-    private data class LangOption(val label: String, val code: String)
-
-    private val langOptions = listOf(
-        LangOption("Auto-detect", "auto"),
-        LangOption("English", "en"),
-        LangOption("German", "de"),
-        LangOption("Spanish", "es"),
-        LangOption("French", "fr"),
-        LangOption("Italian", "it"),
-        LangOption("Portuguese", "pt"),
-        LangOption("Dutch", "nl"),
-        LangOption("Polish", "pl"),
-        LangOption("Russian", "ru"),
-        LangOption("Turkish", "tr"),
-        LangOption("Japanese", "ja"),
-        LangOption("Korean", "ko"),
-        LangOption("Chinese", "zh"),
+    private data class LangOption(
+        val label: String,
+        val code: String,
     )
 
-    private fun currentLanguageCode(): String =
-        prefs().getString("stt_language", "auto") ?: "auto"
+    private val langOptions =
+        listOf(
+            LangOption("Auto-detect", "auto"),
+            LangOption("English", "en"),
+            LangOption("German", "de"),
+            LangOption("Spanish", "es"),
+            LangOption("French", "fr"),
+            LangOption("Italian", "it"),
+            LangOption("Portuguese", "pt"),
+            LangOption("Dutch", "nl"),
+            LangOption("Polish", "pl"),
+            LangOption("Russian", "ru"),
+            LangOption("Turkish", "tr"),
+            LangOption("Japanese", "ja"),
+            LangOption("Korean", "ko"),
+            LangOption("Chinese", "zh"),
+        )
+
+    private fun currentLanguageCode(): String = prefs().getString("stt_language", "auto") ?: "auto"
 
     private fun currentLanguageLabel(): String {
         val code = currentLanguageCode()
@@ -928,40 +1046,46 @@ class MainActivity : AppCompatActivity() {
     private fun promptLanguage() {
         val labels = (langOptions.map { it.label } + "Custom code…").toTypedArray()
         val current = langOptions.indexOfFirst { it.code == currentLanguageCode() }
-        android.app.AlertDialog.Builder(this)
+        android.app.AlertDialog
+            .Builder(this)
             .setTitle("Transcription language")
             .setSingleChoiceItems(labels, current) { dialog, which ->
                 dialog.dismiss()
-                if (which == labels.size - 1) promptCustomLanguage()
-                else {
+                if (which == labels.size - 1) {
+                    promptCustomLanguage()
+                } else {
                     prefs().edit().putString("stt_language", langOptions[which].code).apply()
                     refresh()
                 }
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun promptCustomLanguage() {
-        val input = EditText(this).apply {
-            hint = "ISO-639-1 code, e.g. uk"
-            inputType = android.text.InputType.TYPE_CLASS_TEXT
-            val cur = currentLanguageCode()
-            if (cur != "auto") setText(cur)
-        }
-        android.app.AlertDialog.Builder(this)
+        val input =
+            EditText(this).apply {
+                hint = "ISO-639-1 code, e.g. uk"
+                inputType = android.text.InputType.TYPE_CLASS_TEXT
+                val cur = currentLanguageCode()
+                if (cur != "auto") setText(cur)
+            }
+        android.app.AlertDialog
+            .Builder(this)
             .setTitle("Custom language code")
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
-                val code = input.text.toString().trim().lowercase()
+                val code =
+                    input.text
+                        .toString()
+                        .trim()
+                        .lowercase()
                 if (code.matches(Regex("^[a-z]{2,3}$"))) {
                     prefs().edit().putString("stt_language", code).apply()
                     refresh()
                 } else {
                     Toast.makeText(this, "Invalid language code", Toast.LENGTH_SHORT).show()
                 }
-            }
-            .setNegativeButton("Cancel", null)
+            }.setNegativeButton("Cancel", null)
             .show()
     }
 
@@ -980,8 +1104,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun readBackup(uri: Uri) {
         try {
-            val text = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                ?: throw java.io.IOException("Could not read file")
+            val text =
+                contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    ?: throw java.io.IOException("Could not read file")
             val result = SettingsBackup.import(prefs(), text)
             if (result.isSuccess) {
                 Toast.makeText(this, "Imported ${result.getOrNull() ?: 0} settings", Toast.LENGTH_SHORT).show()
@@ -1004,23 +1129,25 @@ class MainActivity : AppCompatActivity() {
         widget: View? = null,
         onClick: (() -> Unit)? = null,
     ): LinearLayout {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(24), dp(16), dp(24), dp(16))
-            isClickable = onClick != null
-            isFocusable = onClick != null
-            if (onClick != null) {
-                val outValue = TypedValue()
-                context.theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)
-                setBackgroundResource(outValue.resourceId)
-                setOnClickListener { onClick() }
+        val row =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(24), dp(16), dp(24), dp(16))
+                isClickable = onClick != null
+                isFocusable = onClick != null
+                if (onClick != null) {
+                    val outValue = TypedValue()
+                    context.theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)
+                    setBackgroundResource(outValue.resourceId)
+                    setOnClickListener { onClick() }
+                }
             }
-        }
 
-        val textContainer = vertical(0).apply {
-            layoutParams = LinearLayout.LayoutParams(0, LP_WRAP, 1f)
-        }
+        val textContainer =
+            vertical(0).apply {
+                layoutParams = LinearLayout.LayoutParams(0, LP_WRAP, 1f)
+            }
 
         textContainer.addView(
             TextView(this).apply {
@@ -1047,53 +1174,70 @@ class MainActivity : AppCompatActivity() {
         return row
     }
 
-    private fun sectionHeader(title: String) = TextView(this).apply {
-        text = title
-        textSize = 14f
-        setTypeface(typeface, Typeface.BOLD)
-        setTextColor(attrColor(com.google.android.material.R.attr.colorPrimary))
-        setPadding(dp(24), dp(24), dp(24), dp(8))
-    }
+    private fun sectionHeader(title: String) =
+        TextView(this).apply {
+            text = title
+            textSize = 14f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(attrColor(com.google.android.material.R.attr.colorPrimary))
+            setPadding(dp(24), dp(24), dp(24), dp(8))
+        }
 
-    private fun vertical(padH: Int, padV: Int = padH) = LinearLayout(this).apply {
+    private fun vertical(
+        padH: Int,
+        padV: Int = padH,
+    ) = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(padH, padV, padH, padV)
     }
 
     private fun currentPrompt() = prefs().getString("post_processing_prompt", PostProcessor.DEFAULT_PROMPT) ?: PostProcessor.DEFAULT_PROMPT
-    private fun customPrompt() = prefs().getString("custom_post_processing_prompt", PostProcessor.DEFAULT_PROMPT) ?: PostProcessor.DEFAULT_PROMPT
+
+    private fun customPrompt() =
+        prefs().getString("custom_post_processing_prompt", PostProcessor.DEFAULT_PROMPT) ?: PostProcessor.DEFAULT_PROMPT
 
     private fun customPromptSummary(): String {
         val prompt = customPrompt()
-        return if (prompt == PostProcessor.DEFAULT_PROMPT) "Your edited prompt"
-        else prompt.replace("\n", " ")
+        return if (prompt == PostProcessor.DEFAULT_PROMPT) {
+            "Your edited prompt"
+        } else {
+            prompt.replace("\n", " ")
+        }
     }
 
-    private data class PromptPreset(val key: String, val title: String, val subtitle: String, val prompt: String)
-
-    private fun promptPresets() = listOf(
-        PromptPreset(
-            key = "dev",
-            title = "Dev cleanup",
-            subtitle = "Best for coding, CLI, and project names",
-            prompt = PostProcessor.DEV_PROMPT,
-        ),
-        PromptPreset(
-            key = "simple",
-            title = "Simple cleanup",
-            subtitle = "Grammar, punctuation, and light cleanup",
-            prompt = PostProcessor.SIMPLE_PROMPT,
-        ),
-        PromptPreset(
-            key = "custom",
-            title = "Custom",
-            subtitle = customPromptSummary(),
-            prompt = customPrompt(),
-        ),
+    private data class PromptPreset(
+        val key: String,
+        val title: String,
+        val subtitle: String,
+        val prompt: String,
     )
 
+    private fun promptPresets() =
+        listOf(
+            PromptPreset(
+                key = "dev",
+                title = "Dev cleanup",
+                subtitle = "Best for coding, CLI, and project names",
+                prompt = PostProcessor.DEV_PROMPT,
+            ),
+            PromptPreset(
+                key = "simple",
+                title = "Simple cleanup",
+                subtitle = "Grammar, punctuation, and light cleanup",
+                prompt = PostProcessor.SIMPLE_PROMPT,
+            ),
+            PromptPreset(
+                key = "custom",
+                title = "Custom",
+                subtitle = customPromptSummary(),
+                prompt = customPrompt(),
+            ),
+        )
+
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
+
     private fun hasPerm(p: String) = ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED
+
     private fun attrColor(attr: Int): Int {
         val ta = obtainStyledAttributes(intArrayOf(attr))
         val color = ta.getColor(0, 0)
@@ -1109,85 +1253,129 @@ class MainActivity : AppCompatActivity() {
             val c = HistoryManager.count(this)
             val b = HistoryManager.bytesUsed(this)
             val kb = (b / 1024).coerceAtLeast(0)
-            "$c entries · ~${kb} KB" // quick summary
+            "$c entries · ~$kb KB" // quick summary
         }
 
-        val browseRow = settingsRow("Browse history", "Open the full history screen — search, copy, delete") {
-            historyLauncher.launch(android.content.Intent(this, HistoryActivity::class.java))
-        }
-        val dictRow = settingsRow("Dictionary", dictionarySummary()) {
-            dictionaryLauncher.launch(android.content.Intent(this, DictionaryActivity::class.java))
-        }
+        val browseRow =
+            settingsRow("Browse history", "Open the full history screen — search, copy, delete") {
+                historyLauncher.launch(android.content.Intent(this, HistoryActivity::class.java))
+            }
+        val dictRow =
+            settingsRow("Dictionary", dictionarySummary()) {
+                dictionaryLauncher.launch(android.content.Intent(this, DictionaryActivity::class.java))
+            }
 
-        val tonesRow = settingsRow("App tones", run {
-            val n = ToneManager.load(this).size
-            if (n == 0) "Same tone everywhere — tap to customize per app"
-            else "$n app${if (n == 1) "" else "s"} customized"
-        }) {
-            tonesLauncher.launch(android.content.Intent(this, TonesActivity::class.java))
-        }
+        val tonesRow =
+            settingsRow(
+                "App tones",
+                run {
+                    val n = ToneManager.mappings(this).size
+                    if (n == 0) {
+                        "Same tone everywhere — tap to customize per app"
+                    } else {
+                        "$n app${if (n == 1) "" else "s"} customized"
+                    }
+                },
+            ) {
+                tonesLauncher.launch(android.content.Intent(this, TonesActivity::class.java))
+            }
 
-        val historyLimitRow = settingsRow(
-            "Retention limit",
-            "${prefs().getInt(HistoryManager.KEY_HISTORY_MAX_MB, HistoryManager.DEF_MAX_MB)} MB · ${prefs().getInt(HistoryManager.KEY_HISTORY_MAX_DAYS, HistoryManager.DEF_MAX_DAYS)} days — tap to change",
-        ) {
-            val curMb = prefs().getInt(HistoryManager.KEY_HISTORY_MAX_MB, HistoryManager.DEF_MAX_MB)
-            val curDays = prefs().getInt(HistoryManager.KEY_HISTORY_MAX_DAYS, HistoryManager.DEF_MAX_DAYS)
-            val mbInput = EditText(this).apply {
-                hint = "Max MB (0 = unlimited)"
-                setText(if (curMb == 0) "" else curMb.toString())
-                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+        val historyLimitRow =
+            settingsRow(
+                "Retention limit",
+                "${prefs().getInt(
+                    HistoryManager.KEY_HISTORY_MAX_MB,
+                    HistoryManager.DEF_MAX_MB,
+                )} MB · ${prefs().getInt(HistoryManager.KEY_HISTORY_MAX_DAYS, HistoryManager.DEF_MAX_DAYS)} days — tap to change",
+            ) {
+                val curMb = prefs().getInt(HistoryManager.KEY_HISTORY_MAX_MB, HistoryManager.DEF_MAX_MB)
+                val curDays = prefs().getInt(HistoryManager.KEY_HISTORY_MAX_DAYS, HistoryManager.DEF_MAX_DAYS)
+                val mbInput =
+                    EditText(this).apply {
+                        hint = "Max MB (0 = unlimited)"
+                        setText(if (curMb == 0) "" else curMb.toString())
+                        inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                    }
+                val daysInput =
+                    EditText(this).apply {
+                        hint = "Max days (0 = forever)"
+                        setText(if (curDays == 0) "" else curDays.toString())
+                        inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                    }
+                val form =
+                    vertical(dp(24)).apply {
+                        addView(
+                            TextView(this@MainActivity).apply {
+                                text = "Max stored (MB)"
+                                textSize = 12f
+                            },
+                        )
+                        addView(mbInput)
+                        addView(
+                            TextView(this@MainActivity).apply {
+                                text = "Keep for (days)"
+                                textSize = 12f
+                            },
+                        )
+                        addView(daysInput)
+                    }
+                android.app.AlertDialog
+                    .Builder(this)
+                    .setTitle("History retention")
+                    .setView(form.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
+                    .setPositiveButton("Save") { _, _ ->
+                        val mb =
+                            mbInput.text
+                                .toString()
+                                .trim()
+                                .toIntOrNull()
+                                ?.coerceAtLeast(0) ?: curMb
+                        val days =
+                            daysInput.text
+                                .toString()
+                                .trim()
+                                .toIntOrNull()
+                                ?.coerceAtLeast(0) ?: curDays
+                        prefs()
+                            .edit()
+                            .putInt(HistoryManager.KEY_HISTORY_MAX_MB, mb)
+                            .putInt(HistoryManager.KEY_HISTORY_MAX_DAYS, days)
+                            .apply()
+                        refresh()
+                    }.setNegativeButton("Cancel", null)
+                    .show()
             }
-            val daysInput = EditText(this).apply {
-                hint = "Max days (0 = forever)"
-                setText(if (curDays == 0) "" else curDays.toString())
-                inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            }
-            val form = vertical(dp(24)).apply {
-                addView(TextView(this@MainActivity).apply { text = "Max stored (MB)"; textSize = 12f })
-                addView(mbInput)
-                addView(TextView(this@MainActivity).apply { text = "Keep for (days)"; textSize = 12f })
-                addView(daysInput)
-            }
-            android.app.AlertDialog.Builder(this)
-                .setTitle("History retention")
-                .setView(form.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
-                .setPositiveButton("Save") { _, _ ->
-                    val mb = mbInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(0) ?: curMb
-                    val days = daysInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(0) ?: curDays
-                    prefs().edit()
-                        .putInt(HistoryManager.KEY_HISTORY_MAX_MB, mb)
-                        .putInt(HistoryManager.KEY_HISTORY_MAX_DAYS, days)
-                        .apply()
-                    refresh()
-                }
-                .setNegativeButton("Cancel", null)
-                .show()
-        }
 
-        val enabledRow = run {
-            val sw = MaterialSwitch(this).apply {
-                isClickable = false
-                isChecked = HistoryManager.enabled(prefs())
+        val enabledRow =
+            run {
+                val sw =
+                    MaterialSwitch(this).apply {
+                        isClickable = false
+                        isChecked = HistoryManager.enabled(prefs())
+                    }
+                val row =
+                    settingsRow("Save history", if (sw.isChecked) "On" else "Off", sw) {
+                        val nv = !prefs().getBoolean(HistoryManager.KEY_HISTORY_ENABLED, HistoryManager.DEF_HISTORY_ENABLED)
+                        prefs().edit().putBoolean(HistoryManager.KEY_HISTORY_ENABLED, nv).apply()
+                        sw.isChecked = nv
+                        refresh()
+                    }
+                row.tag = "history_enabled_row"
+                row
             }
-            val row = settingsRow("Save history", if (sw.isChecked) "On" else "Off", sw) {
-                val nv = !prefs().getBoolean(HistoryManager.KEY_HISTORY_ENABLED, HistoryManager.DEF_HISTORY_ENABLED)
-                prefs().edit().putBoolean(HistoryManager.KEY_HISTORY_ENABLED, nv).apply()
-                sw.isChecked = nv
-                refresh()
-            }
-            row.tag = "history_enabled_row"
-            row
-        }
 
-        val clearRow = settingsRow("Clear history", "Remove all saved transcriptions") {
-            android.app.AlertDialog.Builder(this)
-                .setTitle("Clear history?")
-                .setMessage("${HistoryManager.count(this)} entries will be deleted.")
-                .setPositiveButton("Clear") { _, _ -> HistoryManager.clear(this); refresh() }
-                .setNegativeButton("Cancel", null)
-                .show()
-        }
+        val clearRow =
+            settingsRow("Clear history", "Remove all saved transcriptions") {
+                android.app.AlertDialog
+                    .Builder(this)
+                    .setTitle("Clear history?")
+                    .setMessage("${HistoryManager.count(this)} entries will be deleted.")
+                    .setPositiveButton("Clear") { _, _ ->
+                        HistoryManager.clear(this)
+                        refresh()
+                    }.setNegativeButton("Cancel", null)
+                    .show()
+            }
 
         container.addView(enabledRow)
         container.addView(browseRow)
@@ -1196,14 +1384,21 @@ class MainActivity : AppCompatActivity() {
         container.addView(historyLimitRow)
         container.addView(clearRow)
 
-        val aboutRow = settingsRow("About Verbatide", "Fork of Phone Whisper by kafkasl — tap to view on GitHub") {
-            startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/kafkasl/phone-whisper")))
-        }
+        val aboutRow =
+            settingsRow("About Verbatide", "Fork of Phone Whisper by kafkasl — tap to view on GitHub") {
+                startActivity(
+                    android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse("https://github.com/kafkasl/phone-whisper"),
+                    ),
+                )
+            }
         container.addView(aboutRow)
         return container
     }
 
     private fun prefs() = getSharedPreferences("phonewhisper", MODE_PRIVATE)
+
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 
     companion object {
