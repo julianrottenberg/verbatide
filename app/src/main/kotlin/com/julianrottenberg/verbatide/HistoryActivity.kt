@@ -16,6 +16,8 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -26,9 +28,14 @@ class HistoryActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFFF7F7FA.toInt())
+            setBackgroundColor(attrColor(android.R.attr.colorBackground))
             layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT)
-            setPadding(dp(16), dp(48), dp(16), dp(16))
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(dp(16) + bars.left, dp(16) + bars.top, dp(16) + bars.right, dp(16) + bars.bottom)
+            insets
         }
 
         // Title bar with back button
@@ -40,7 +47,7 @@ class HistoryActivity : AppCompatActivity() {
         val back = TextView(this).apply {
             text = "←  Back"
             textSize = 16f
-            setTextColor(0xFF1F1F1F.toInt())
+            setTextColor(attrColor(android.R.attr.textColorPrimary))
             setPadding(0, 0, dp(16), 0)
             isClickable = true
             setOnClickListener { finish() }
@@ -49,7 +56,7 @@ class HistoryActivity : AppCompatActivity() {
             text = "History"
             textSize = 22f
             setTypeface(typeface, Typeface.BOLD)
-            setTextColor(0xFF1F1F1F.toInt())
+            setTextColor(attrColor(android.R.attr.textColorPrimary))
         }
         titleBar.addView(back)
         titleBar.addView(title)
@@ -79,7 +86,7 @@ class HistoryActivity : AppCompatActivity() {
                     text = if (entries.isEmpty()) "No transcriptions yet." else "No matches."
                     textSize = 14f
                     setPadding(dp(12), dp(16), 0, 0)
-                    setTextColor(0xFF555555.toInt())
+                    setTextColor(attrColor(android.R.attr.textColorSecondary))
                 })
                 return
             }
@@ -87,17 +94,17 @@ class HistoryActivity : AppCompatActivity() {
                 val card = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(12), dp(12), dp(12), dp(12))
-                    setBackgroundColor(0xFFFFFFFF.toInt())
+                    setBackgroundColor(attrColor(com.google.android.material.R.attr.colorSurfaceContainerLow))
                 }
                 val meta = TextView(this).apply {
                     text = "${df.format(Date(e.ts))} · ${e.provider} ${e.lang?.let { "· $it" } ?: ""}"
                     textSize = 12f
-                    setTextColor(0xFF777777.toInt())
+                    setTextColor(attrColor(android.R.attr.textColorSecondary))
                 }
                 val body = TextView(this).apply {
                     text = e.text
                     textSize = 16f
-                    setTextColor(0xFF1F1F1F.toInt())
+                    setTextColor(attrColor(android.R.attr.textColorPrimary))
                     ellipsize = TextUtils.TruncateAt.END
                     maxLines = 6
                     setPadding(0, dp(6), 0, dp(6))
@@ -145,6 +152,13 @@ class HistoryActivity : AppCompatActivity() {
         })
 
         setContentView(root)
+    }
+
+    private fun attrColor(attr: Int): Int {
+        val ta = obtainStyledAttributes(intArrayOf(attr))
+        val color = ta.getColor(0, 0)
+        ta.recycle()
+        return color
     }
 
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
