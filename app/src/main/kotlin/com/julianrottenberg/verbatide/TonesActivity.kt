@@ -239,6 +239,9 @@ class TonesActivity : AppCompatActivity() {
 
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
+        val list =
+            LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+
         val search =
             EditText(this).apply {
                 hint = "Search apps"
@@ -248,8 +251,11 @@ class TonesActivity : AppCompatActivity() {
                 addTextChangedListener(
                     object : TextWatcher {
                         override fun afterTextChanged(s: Editable?) {
-                            pickerQuery = s?.toString().orEmpty()
-                            showPicker()
+                            val q = s?.toString().orEmpty()
+                            if (q == pickerQuery) return
+                            pickerQuery = q
+                            list.removeAllViews()
+                            entries?.let { fillPickerList(list, it, tone) }
                         }
 
                         override fun beforeTextChanged(
@@ -279,14 +285,7 @@ class TonesActivity : AppCompatActivity() {
                 },
             )
         } else {
-            val mappings = ToneManager.mappings(this).associateBy { it.packageName }
-            val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            entries
-                .filter { pickerQuery.isBlank() || it.label.contains(pickerQuery, ignoreCase = true) }
-                .forEach { entry ->
-                    list.addView(pickerRow(entry, mappings[entry.packageName], tone))
-                    list.addView(divider())
-                }
+            fillPickerList(list, entries, tone)
             body.addView(
                 ScrollView(this).apply { addView(list) },
                 LinearLayout.LayoutParams(-1, 0, 1f),
@@ -309,6 +308,20 @@ class TonesActivity : AppCompatActivity() {
                 addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
             }
         setContent(root)
+    }
+
+    private fun fillPickerList(
+        list: LinearLayout,
+        entries: List<AppEntry>,
+        tone: Tone,
+    ) {
+        val mappings = ToneManager.mappings(this).associateBy { it.packageName }
+        entries
+            .filter { pickerQuery.isBlank() || it.label.contains(pickerQuery, ignoreCase = true) }
+            .forEach { entry ->
+                list.addView(pickerRow(entry, mappings[entry.packageName], tone))
+                list.addView(divider())
+            }
     }
 
     // ---------- rows ----------
