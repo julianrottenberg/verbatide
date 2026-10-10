@@ -144,6 +144,24 @@ class MainActivity : AppCompatActivity() {
             }
         root.addView(cloudRow)
 
+        val voiceSwitch =
+            MaterialSwitch(this).apply {
+                isClickable = false
+                isChecked = prefs().getBoolean(VoiceCommands.KEY_ENABLED, VoiceCommands.DEF_ENABLED)
+            }
+        root.addView(
+            settingsRow(
+                "Voice commands",
+                "Say \"delete that\" or \"new paragraph\"",
+                voiceSwitch,
+            ) {
+                val nv = !prefs().getBoolean(VoiceCommands.KEY_ENABLED, VoiceCommands.DEF_ENABLED)
+                prefs().edit().putBoolean(VoiceCommands.KEY_ENABLED, nv).apply()
+                voiceSwitch.isChecked = nv
+                refresh()
+            },
+        )
+
         // --- Transcription language (cloud only; Whisper auto-translates to
         // English without an explicit language param, so this matters for
         // non-English users) ---
