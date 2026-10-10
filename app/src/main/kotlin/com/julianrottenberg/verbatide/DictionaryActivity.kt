@@ -13,6 +13,8 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 
 class DictionaryActivity : AppCompatActivity() {
 
@@ -20,9 +22,14 @@ class DictionaryActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFFF7F7FA.toInt())
+            setBackgroundColor(attrColor(android.R.attr.colorBackground))
             layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT)
-            setPadding(dp(16), dp(48), dp(16), dp(16))
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(dp(16) + bars.left, dp(16) + bars.top, dp(16) + bars.right, dp(16) + bars.bottom)
+            insets
         }
 
         // Title bar with back button
@@ -50,7 +57,7 @@ class DictionaryActivity : AppCompatActivity() {
         val subtitle = TextView(this).apply {
             text = "Applied to every transcript. The spellings are also sent as a hint to OpenAI, Groq and Mistral."
             textSize = 13f
-            setTextColor(0xFF666666.toInt())
+            setTextColor(attrColor(android.R.attr.textColorSecondary))
             setPadding(0, 0, 0, dp(12))
         }
         root.addView(subtitle)
@@ -66,7 +73,7 @@ class DictionaryActivity : AppCompatActivity() {
                     text = "No entries. Tap + Add to create your first word."
                     textSize = 14f
                     setPadding(dp(12), dp(16), 0, 0)
-                    setTextColor(0xFF777777.toInt())
+                    setTextColor(attrColor(android.R.attr.textColorSecondary))
                 }
                 list.addView(empty)
             } else {
@@ -75,7 +82,8 @@ class DictionaryActivity : AppCompatActivity() {
                         orientation = LinearLayout.HORIZONTAL
                         gravity = Gravity.CENTER_VERTICAL
                         setPadding(dp(12), dp(12), dp(12), dp(12))
-                        setBackgroundColor(if (e.enabled) 0xFFFFFFFF.toInt() else 0xFFE0E0E0.toInt())
+                        val cardBg = attrColor(com.google.android.material.R.attr.colorSurfaceContainerLow)
+                        setBackgroundColor(if (e.enabled) cardBg else ((cardBg and 0x00FFFFFF) or 0x66000000))
                     }
                     val params = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) }
                     val info = LinearLayout(this).apply {
@@ -85,13 +93,13 @@ class DictionaryActivity : AppCompatActivity() {
                     val pattern = TextView(this).apply {
                         text = e.pattern
                         textSize = 16f
-                        setTextColor(0xFF1F1F1F.toInt())
+                        setTextColor(attrColor(android.R.attr.textColorPrimary))
                     }
                     val replace = TextView(this).apply {
                         text = if (e.replacement.isBlank() || e.replacement.equals(e.pattern, true)) "(no replacement)"
                         else "→ ${e.replacement}"
                         textSize = 13f
-                        setTextColor(0xFF777777.toInt())
+                        setTextColor(attrColor(android.R.attr.textColorSecondary))
                     }
                     info.addView(pattern)
                     info.addView(replace)
@@ -120,9 +128,9 @@ class DictionaryActivity : AppCompatActivity() {
             text = "+ Add entry"
             textSize = 16f
             setPadding(dp(16), dp(14), dp(16), dp(14))
-            setTextColor(0xFF1F1F1F.toInt())
+            setTextColor(attrColor(android.R.attr.textColorPrimary))
             setTypeface(typeface, Typeface.BOLD)
-            setBackgroundColor(0xFFEEEEEE.toInt())
+            setBackgroundColor(attrColor(com.google.android.material.R.attr.colorSurfaceContainerLow))
             gravity = Gravity.CENTER
             isClickable = true
             val lp = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(16) }
@@ -179,6 +187,13 @@ class DictionaryActivity : AppCompatActivity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun attrColor(attr: Int): Int {
+        val ta = obtainStyledAttributes(intArrayOf(attr))
+        val color = ta.getColor(0, 0)
+        ta.recycle()
+        return color
     }
 
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()

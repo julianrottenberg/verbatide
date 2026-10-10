@@ -17,6 +17,8 @@ import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.util.concurrent.Executors
@@ -50,6 +52,11 @@ class TonesActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         container = FrameLayout(this)
         setContentView(container)
+        ViewCompat.setOnApplyWindowInsetsListener(container) { v, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
         loadApps()
         render()
     }
@@ -581,7 +588,8 @@ class TonesActivity : AppCompatActivity() {
     private fun divider(): View =
         View(this)
             .apply {
-                setBackgroundColor(attrColor(android.R.attr.listDivider))
+                val c = attrColor(android.R.attr.textColorTertiary)
+                setBackgroundColor((c and 0x00FFFFFF) or 0x1E000000)
             }.also {
                 it.layoutParams = LinearLayout.LayoutParams(-1, 1).apply { marginStart = dp(16) }
             }
@@ -589,9 +597,10 @@ class TonesActivity : AppCompatActivity() {
     private fun layoutWidth(): LinearLayout.LayoutParams = LinearLayout.LayoutParams(-1, -2)
 
     private fun attrColor(attr: Int): Int {
-        val tv = TypedValue()
-        theme.resolveAttribute(attr, tv, true)
-        return tv.data
+        val ta = obtainStyledAttributes(intArrayOf(attr))
+        val color = ta.getColor(0, 0)
+        ta.recycle()
+        return color
     }
 
     private fun rippleRes(): Int {

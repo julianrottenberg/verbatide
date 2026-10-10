@@ -17,7 +17,7 @@ import java.io.File
  */
 data class DictEntry(
     val id: Long,
-    val pattern: String,    // raw phrase / word to listen for
+    val pattern: String, // raw phrase / word to listen for
     val replacement: String, // text to substitute (blank = keep as spoken)
     val enabled: Boolean = true,
 )
@@ -30,55 +30,79 @@ object DictionaryManager {
 
     fun file(ctx: Context) = File(ctx.filesDir, FILENAME)
 
-    fun enabled(prefs: android.content.SharedPreferences): Boolean =
-        prefs.getBoolean(KEY_DICT_ENABLED, true)
+    fun enabled(prefs: android.content.SharedPreferences): Boolean = prefs.getBoolean(KEY_DICT_ENABLED, true)
 
-    fun setEnabled(ctx: Context, on: Boolean) {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putBoolean(KEY_DICT_ENABLED, on).apply()
+    fun setEnabled(
+        ctx: Context,
+        on: Boolean,
+    ) {
+        ctx
+            .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_DICT_ENABLED, on)
+            .apply()
     }
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun load(ctx: Context): List<DictEntry> = synchronized(this) {
-        val f = file(ctx)
-        if (!f.exists()) return emptyList()
-        try {
-            val arr = JSONArray(f.readText())
-            (0 until arr.length()).map {
-                val o = arr.getJSONObject(it)
-                DictEntry(
-                    id = o.optLong("id", System.currentTimeMillis()),
-                    pattern = o.optString("pattern", ""),
-                    replacement = o.optString("replacement", ""),
-                    enabled = o.optBoolean("enabled", true),
-                )
-            }.filter { it.pattern.isNotBlank() }.sortedBy { it.pattern.lowercase() }
-        } catch (_: Exception) { emptyList() }
-    }
+    fun load(ctx: Context): List<DictEntry> =
+        synchronized(this) {
+            val f = file(ctx)
+            if (!f.exists()) return emptyList()
+            try {
+                val arr = JSONArray(f.readText())
+                (0 until arr.length())
+                    .map {
+                        val o = arr.getJSONObject(it)
+                        DictEntry(
+                            id = o.optLong("id", System.currentTimeMillis()),
+                            pattern = o.optString("pattern", ""),
+                            replacement = o.optString("replacement", ""),
+                            enabled = o.optBoolean("enabled", true),
+                        )
+                    }.filter { it.pattern.isNotBlank() }
+                    .sortedBy { it.pattern.lowercase() }
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
 
-    fun save(ctx: Context, list: List<DictEntry>) {
+    fun save(
+        ctx: Context,
+        list: List<DictEntry>,
+    ) {
         val f = file(ctx)
         val arr = JSONArray()
         for (e in list) {
-            arr.put(JSONObject().apply {
-                put("id", e.id)
-                put("pattern", e.pattern)
-                put("replacement", e.replacement)
-                put("enabled", e.enabled)
-            })
+            arr.put(
+                JSONObject().apply {
+                    put("id", e.id)
+                    put("pattern", e.pattern)
+                    put("replacement", e.replacement)
+                    put("enabled", e.enabled)
+                },
+            )
         }
-        try { f.writeText(arr.toString()) } catch (_: Exception) {}
+        try {
+            f.writeText(arr.toString())
+        } catch (_: Exception) {
+        }
     }
 
-    fun upsert(ctx: Context, entry: DictEntry) {
+    fun upsert(
+        ctx: Context,
+        entry: DictEntry,
+    ) {
         val cur = load(ctx).toMutableList()
         val ix = cur.indexOfFirst { it.id == entry.id }
         if (ix >= 0) cur[ix] = entry else cur.add(entry)
         save(ctx, cur)
     }
 
-    fun remove(ctx: Context, id: Long) {
+    fun remove(
+        ctx: Context,
+        id: Long,
+    ) {
         val cur = load(ctx).filter { it.id != id }
         save(ctx, cur)
     }
@@ -101,7 +125,10 @@ object DictionaryManager {
      * English on German audio, the drift this app already fixed once.
      * Cut at a term boundary, not mid-word.
      */
-    fun vocabularyPrompt(terms: List<String>, limitChars: Int = 500): String {
+    fun vocabularyPrompt(
+        terms: List<String>,
+        limitChars: Int = 500,
+    ): String {
         if (terms.isEmpty()) return ""
         val hint = terms.joinToString(", ")
         return if (hint.length > limitChars) hint.take(limitChars).substringBeforeLast(", ") else hint
@@ -110,11 +137,12 @@ object DictionaryManager {
     /** How an STT endpoint accepts the vocabulary. Only providers whose docs confirm it. */
     enum class PromptStyle { NONE, PROMPT_FIELD, CONTEXT_BIAS }
 
-    fun promptStyleFor(sttUrl: String): PromptStyle = when {
-        sttUrl.contains("api.openai.com") || sttUrl.contains("api.groq.com") -> PromptStyle.PROMPT_FIELD
-        sttUrl.contains("api.mistral.ai") -> PromptStyle.CONTEXT_BIAS
-        else -> PromptStyle.NONE
-    }
+    fun promptStyleFor(sttUrl: String): PromptStyle =
+        when {
+            sttUrl.contains("api.openai.com") || sttUrl.contains("api.groq.com") -> PromptStyle.PROMPT_FIELD
+            sttUrl.contains("api.mistral.ai") -> PromptStyle.CONTEXT_BIAS
+            else -> PromptStyle.NONE
+        }
 
     /**
      * Mistral `context_bias`: at most 100 phrases of up to 80 chars. Voxtral rejects
@@ -122,14 +150,24 @@ object DictionaryManager {
      * whitespace becomes "_" (the documented way to bias a phrase). Over-long
      * items are dropped rather than cut mid-word.
      */
-    fun contextBiasTerms(terms: List<String>): List<String> = terms
-        .map { it.replace(",", " ").trim().split(WHITESPACE).filter { w -> w.isNotEmpty() }.joinToString("_") }
-        .filter { it.isNotBlank() && it.length <= 80 }
-        .distinctBy { it.lowercase() }
-        .take(100)
+    fun contextBiasTerms(terms: List<String>): List<String> =
+        terms
+            .map {
+                it
+                    .replace(",", " ")
+                    .trim()
+                    .split(WHITESPACE)
+                    .filter { w -> w.isNotEmpty() }
+                    .joinToString("_")
+            }.filter { it.isNotBlank() && it.length <= 80 }
+            .distinctBy { it.lowercase() }
+            .take(100)
 
     /** Rewrites a transcript with the enabled dictionary rules. */
-    fun applyReplacements(ctx: Context, text: String): String {
+    fun applyReplacements(
+        ctx: Context,
+        text: String,
+    ): String {
         if (!enabled(prefs(ctx))) return text
         return rewriteWith(load(ctx), text)
     }
@@ -138,7 +176,10 @@ object DictionaryManager {
      * Whisper can echo its prompt back when the audio is silence or noise.
      * Drop an exact echo so the prompt never ends up in the user's text.
      */
-    fun stripPromptEcho(transcript: String, prompt: String?): String {
+    fun stripPromptEcho(
+        transcript: String,
+        prompt: String?,
+    ): String {
         if (prompt.isNullOrBlank()) return transcript
         return transcript.replace(prompt, "").trim()
     }
@@ -151,7 +192,10 @@ object DictionaryManager {
      * scanned once, so a replacement is never rewritten again. Whitespace inside
      * a pattern matches any run of whitespace in the transcript.
      */
-    internal fun rewriteWith(entries: List<DictEntry>, text: String): String {
+    internal fun rewriteWith(
+        entries: List<DictEntry>,
+        text: String,
+    ): String {
         val rules = LinkedHashMap<String, String>()
         for (e in entries) {
             if (!e.enabled || e.pattern.isBlank() || e.replacement.isBlank()) continue
@@ -159,18 +203,24 @@ object DictionaryManager {
         }
         if (rules.isEmpty() || text.isEmpty()) return text
 
-        val alternation = rules.keys
-            .sortedByDescending { it.length }
-            .joinToString("|") { phrase ->
-                phrase.split(' ').joinToString("\\s+") { Regex.escape(it) }
-            }
-        val regex = Regex(
-            "(?<![\\p{L}\\p{N}])(?:$alternation)(?![\\p{L}\\p{N}])",
-            RegexOption.IGNORE_CASE,
-        )
+        val alternation =
+            rules.keys
+                .sortedByDescending { it.length }
+                .joinToString("|") { phrase ->
+                    phrase.split(' ').joinToString("\\s+") { Regex.escape(it) }
+                }
+        val regex =
+            Regex(
+                "(?<![\\p{L}\\p{N}])(?:$alternation)(?![\\p{L}\\p{N}])",
+                RegexOption.IGNORE_CASE,
+            )
         return regex.replace(text) { m -> rules[lookupKey(m.value)] ?: m.value }
     }
 
     private fun lookupKey(s: String): String =
-        s.trim().split(WHITESPACE).joinToString(" ").lowercase()
+        s
+            .trim()
+            .split(WHITESPACE)
+            .joinToString(" ")
+            .lowercase()
 }
