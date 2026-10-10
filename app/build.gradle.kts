@@ -51,7 +51,7 @@ dependencies {
     // that crashed the accessibility service on startup).
     implementation(files("libs/sherpa-onnx-1.13.5.aar"))
     implementation("androidx.security:security-crypto:1.1.0")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:okhttp:5.5.0")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("com.google.android.material:material:1.12.0")
