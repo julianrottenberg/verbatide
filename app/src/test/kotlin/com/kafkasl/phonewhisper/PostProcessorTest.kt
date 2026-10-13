@@ -130,4 +130,63 @@ class PostProcessorTest {
         assertTrue(p.contains("never translate", ignoreCase = true))
         assertTrue(p.contains("Verbatide"))
     }
+
+    // --- Reasoning wire format gating ---
+
+    private fun bodyWithReasoning(chatUrl: String, reasoning: PostProcessor.Reasoning): org.json.JSONObject {
+        val body = org.json.JSONObject()
+        PostProcessor.applyReasoning(body, chatUrl, reasoning)
+        return body
+    }
+
+    @Test fun `reasoning off sends nothing to strict providers`() {
+        // Mistral 422s on unknown fields (extra_forbidden) — the cleanup regression.
+        assertEquals(0, bodyWithReasoning("https://api.mistral.ai/v1/chat/completions", PostProcessor.Reasoning.OFF).length())
+        assertEquals(0, bodyWithReasoning("https://api.openai.com/v1/chat/completions", PostProcessor.Reasoning.OFF).length())
+        assertEquals(0, bodyWithReasoning("https://api.groq.com/openai/v1/chat/completions", PostProcessor.Reasoning.OFF).length())
+        assertEquals(0, bodyWithReasoning("https://api.venice.ai/api/v1/chat/completions", PostProcessor.Reasoning.OFF).length())
+        assertEquals(0, bodyWithReasoning("https://selfhosted.example.com/v1/chat/completions", PostProcessor.Reasoning.OFF).length())
+    }
+
+    @Test fun `reasoning off sent where supported`() {
+        val or = bodyWithReasoning("https://openrouter.ai/api/v1/chat/completions", PostProcessor.Reasoning.OFF)
+        assertEquals(false, or.getJSONObject("reasoning").getBoolean("enabled"))
+        val tg = bodyWithReasoning("https://api.together.ai/v1/chat/completions", PostProcessor.Reasoning.OFF)
+        assertEquals(false, tg.getJSONObject("reasoning").getBoolean("enabled"))
+    }
+
+    @Test fun `reasoning effort wire format per provider`() {
+        val or = bodyWithReasoning("https://openrouter.ai/api/v1/chat/completions", PostProcessor.Reasoning.LOW)
+        assertEquals("low", or.getJSONObject("reasoning").getString("effort"))
+        val oa = bodyWithReasoning("https://api.openai.com/v1/chat/completions", PostProcessor.Reasoning.HIGH)
+        assertEquals("high", oa.getString("reasoning_effort"))
+        val gq = bodyWithReasoning("https://api.groq.com/openai/v1/chat/completions", PostProcessor.Reasoning.MEDIUM)
+        assertEquals("medium", gq.getString("reasoning_effort"))
+        val tg = bodyWithReasoning("https://api.together.ai/v1/chat/completions", PostProcessor.Reasoning.LOW)
+        assertEquals("low", tg.getString("reasoning_effort"))
+        // Unknown/strict endpoints get nothing rather than a request-killing 422.
+        assertEquals(0, bodyWithReasoning("https://api.mistral.ai/v1/chat/completions", PostProcessor.Reasoning.LOW).length())
+        assertEquals(0, bodyWithReasoning("https://api.nano-gpt.com/api/v1/chat/completions", PostProcessor.Reasoning.LOW).length())
+    }
+
+    @Test fun `reasoning default sends nothing`() {
+        assertEquals(0, bodyWithReasoning("https://openrouter.ai/api/v1/chat/completions", PostProcessor.Reasoning.DEFAULT).length())
+    }
+
+    // --- Mistral error shape ---
+
+    @Test fun `parse mistral 422 extra_forbidden detail`() {
+        val json = """
+        {"object":"error","message":{"detail":[{"type":"extra_forbidden","loc":["body","reasoning"],"msg":"Extra inputs are not permitted","input":{"enabled":false}}]},"type":"invalid_request_error","param":null,"code":null,"raw_status_code":422}
+        """.trimIndent()
+        val result = PostProcessor.parseResponse(json)
+        assertEquals(null, result.text)
+        assertTrue(result.error!!.contains("Extra inputs are not permitted"))
+        assertTrue(result.error!!.contains("body.reasoning"))
+    }
+
+    @Test fun `parse mistral plain message error`() {
+        val result = PostProcessor.parseResponse("""{"object":"error","message":"Unauthorized","type":"invalid_request_error"}""")
+        assertEquals("Unauthorized", result.error)
+    }
 }
