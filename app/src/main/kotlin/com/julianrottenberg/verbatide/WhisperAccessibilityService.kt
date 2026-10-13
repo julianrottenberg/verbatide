@@ -925,7 +925,15 @@ class WhisperAccessibilityService : AccessibilityService() {
                             HistoryEntry(System.currentTimeMillis(), result.text, provider, languageHint),
                         )
                     } else {
-                        injectText(text, feedback = "Cleanup failed — raw copied to clipboard", feedbackDurationMs = 3000)
+                        // Surface the actual cause (HTTP code, provider message) so
+                        // "cleanup doesn't work" is debuggable from the toast alone.
+                        Log.w(TAG, "Cleanup failed, falling back to raw text: ${result.error}")
+                        val reason = result.error?.let { if (it.length > 90) it.take(90) + "…" else it }
+                        injectText(
+                            text,
+                            feedback = if (reason != null) "Cleanup failed: $reason" else "Cleanup failed — raw copied to clipboard",
+                            feedbackDurationMs = 4000,
+                        )
                         HistoryManager.append(
                             this@WhisperAccessibilityService,
                             HistoryEntry(System.currentTimeMillis(), text, provider, languageHint),

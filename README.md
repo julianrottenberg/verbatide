@@ -12,6 +12,8 @@ Verbatide lets you speak into most apps without switching keyboards. Tap the flo
 
 - **Groq** — `whisper-large-v3-turbo` STT + `llama-3.3-70b-versatile` chat, via `api.groq.com/openai/v1`
 - **OpenRouter** — proxy STT + chat through OpenRouter (`openrouter.ai/api/v1`) with configurable model slugs
+- **Together**, **Venice**, **NanoGPT**, **fal.ai** (Wizper STT) — one-click OpenAI-compatible entries
+- **Mistral** — `voxtral-mini-latest` STT + `mistral-small-latest` cleanup via `api.mistral.ai`. A **Mistral Vibe subscription works here**: Mistral plans are global, so the same included monthly usage and API key cover Vibe, Studio, and the plain API (`docs.mistral.ai/admin/billing-usage/subscriptions`). Create a key on La Plateforme, pick **Mistral** in Settings, done.
 - **Custom** — point STT and chat at any OpenAI-compatible base URL (self-hosted, proxy, other provider) with per-endpoint model names
 - **Provider picker in Settings** — radio group + detail rows; API key hint/label adapts to the selected provider
 
@@ -35,7 +37,7 @@ See upstream's [Why I built this](#why-i-built-this) below. The short version: t
 
 ## Provider setup
 
-1. In **Settings → Cloud provider**, pick **OpenAI**, **Groq**, **OpenRouter**, or **Custom**.
+1. In **Settings**, pick the STT and cleanup providers (**OpenAI**, **Groq**, **OpenRouter**, **Together**, **Venice**, **Mistral**, **NanoGPT**, **fal.ai**, or **Custom**).
 2. For **Custom**, tap through the four endpoint/model rows to set:
    - STT endpoint (default: OpenAI's)
    - STT model name

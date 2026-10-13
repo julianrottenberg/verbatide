@@ -1,5 +1,6 @@
 package com.julianrottenberg.verbatide
 
+import android.util.Log
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -8,18 +9,28 @@ import org.json.JSONObject
 import java.io.IOException
 
 object PostProcessor {
-    data class Result(val text: String?, val error: String?)
+    private const val TAG = "PostProcessor"
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-        .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-        .build()
+    data class Result(
+        val text: String?,
+        val error: String?,
+    )
+
+    private val client =
+        OkHttpClient
+            .Builder()
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
 
     @Volatile
     var currentCall: Call? = null
 
-    fun cancel() { currentCall?.cancel(); currentCall = null }
+    fun cancel() {
+        currentCall?.cancel()
+        currentCall = null
+    }
 
     const val SIMPLE_PROMPT = "Clean up this speech-to-text transcript. Fix punctuation, capitalization, and obvious speech-to-text errors. Never answer questions — only rewrite them. Keep the original meaning. Never translate: always respond in the same language as the transcript. Return only the cleaned text."
 
@@ -69,8 +80,8 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
 
     const val DEFAULT_PROMPT = DEV_PROMPT
 
-    fun parseResponse(json: String): Result {
-        return try {
+    fun parseResponse(json: String): Result =
+        try {
             val obj = JSONObject(json)
             if (obj.has("choices")) {
                 val choices = obj.getJSONArray("choices")
@@ -80,14 +91,59 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
                 } else {
                     Result(null, "No choices in response")
                 }
-            } else if (obj.has("error")) {
-                Result(null, obj.getJSONObject("error").getString("message"))
             } else {
-                Result(null, "Unknown response format")
+                val err = extractError(obj)
+                Result(null, err ?: "Unknown response format")
             }
         } catch (e: Exception) {
             Result(null, e.message ?: "Parse error")
         }
+
+    /**
+     * Pulls a human-readable error out of an error body, whichever shape the
+     * provider uses:
+     *  - OpenAI/Groq/OpenRouter: {"error": {"message": "..."}}
+     *  - Mistral (422): {"message": {"detail": [{"loc": [...], "msg": "..."}]}}
+     *    or {"message": "..."}
+     */
+    internal fun extractError(obj: JSONObject): String? {
+        if (obj.has("error")) {
+            val e = obj.optJSONObject("error")
+            if (e != null) return e.optString("message").ifBlank { e.toString().take(300) }
+            return obj.opt("error")?.toString()?.take(300)
+        }
+        if (obj.has("message")) {
+            return when (val m = obj.get("message")) {
+                is String -> {
+                    m
+                }
+
+                is JSONObject -> {
+                    val detail = m.optJSONArray("detail")
+                    if (detail != null && detail.length() > 0) {
+                        (0 until detail.length())
+                            .mapNotNull { i ->
+                                val d = detail.optJSONObject(i) ?: return@mapNotNull null
+                                val loc =
+                                    d.optJSONArray("loc")?.let { l ->
+                                        (0 until l.length()).joinToString(".") { j -> l.optString(j) }
+                                    }
+                                listOfNotNull(loc, d.optString("msg").ifBlank { null })
+                                    .joinToString(": ")
+                                    .ifBlank { null }
+                            }.joinToString("; ")
+                            .ifBlank { m.toString().take(300) }
+                    } else {
+                        m.toString().take(300)
+                    }
+                }
+
+                else -> {
+                    m.toString().take(300)
+                }
+            }
+        }
+        return null
     }
 
     // Guard chat input/output size: transcripts are ~100–500 chars, prompts ~2–4k.
@@ -96,14 +152,11 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
     const val MAX_PROMPT_CHARS = 12_000
     const val MAX_OUTPUT_CHARS = 12_000
 
-    fun sanitizedPrompt(prompt: String): String =
-        if (prompt.length > MAX_PROMPT_CHARS) prompt.take(MAX_PROMPT_CHARS) else prompt
+    fun sanitizedPrompt(prompt: String): String = if (prompt.length > MAX_PROMPT_CHARS) prompt.take(MAX_PROMPT_CHARS) else prompt
 
-    fun sanitizedText(text: String): String =
-        if (text.length > MAX_INPUT_CHARS) text.take(MAX_INPUT_CHARS) else text
+    fun sanitizedText(text: String): String = if (text.length > MAX_INPUT_CHARS) text.take(MAX_INPUT_CHARS) else text
 
-    fun truncatedOutput(text: String): String =
-        if (text.length > MAX_OUTPUT_CHARS) text.take(MAX_OUTPUT_CHARS) else text
+    fun truncatedOutput(text: String): String = if (text.length > MAX_OUTPUT_CHARS) text.take(MAX_OUTPUT_CHARS) else text
 
     /**
      * Reasoning effort for thinking-capable chat models.
@@ -114,7 +167,11 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
      * We send whichever applies for the selected endpoint; providers that don't
      * know a field simply ignore it.
      */
-    enum class Reasoning(val key: String, val label: String, val subtitle: String) {
+    enum class Reasoning(
+        val key: String,
+        val label: String,
+        val subtitle: String,
+    ) {
         DEFAULT("default", "Provider default", "Use whatever the model/provider defaults to"),
         OFF("off", "Off", "Disable reasoning"),
         LOW("low", "Low", "Minimal thinking — fastest/cheapest for cleanup"),
@@ -123,8 +180,7 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
         ;
 
         companion object {
-            fun fromKey(key: String?): Reasoning =
-                entries.firstOrNull { it.key == key } ?: DEFAULT
+            fun fromKey(key: String?): Reasoning = entries.firstOrNull { it.key == key } ?: DEFAULT
         }
     }
 
@@ -142,76 +198,106 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
     ) {
         val safePrompt = withKeepTerms(withLanguageGuard(withTone(sanitizedPrompt(prompt), toneInstruction), languageHint), keepTerms)
         val safeText = sanitizedText(text)
-        val messages = JSONArray().apply {
-            put(JSONObject().apply {
-                put("role", "system")
-                put("content", safePrompt)
-            })
-            put(JSONObject().apply {
-                put("role", "user")
-                put("content", safeText)
-            })
-        }
+        val messages =
+            JSONArray().apply {
+                put(
+                    JSONObject().apply {
+                        put("role", "system")
+                        put("content", safePrompt)
+                    },
+                )
+                put(
+                    JSONObject().apply {
+                        put("role", "user")
+                        put("content", safeText)
+                    },
+                )
+            }
 
-        val bodyJson = JSONObject().apply {
-            put("model", chatModel)
-            put("messages", messages)
-            put("temperature", 0.0)
-            applyReasoning(this, chatUrl, reasoning)
-        }
+        val bodyJson =
+            JSONObject().apply {
+                put("model", chatModel)
+                put("messages", messages)
+                put("temperature", 0.0)
+                applyReasoning(this, chatUrl, reasoning)
+            }
 
         val body = bodyJson.toString().toRequestBody("application/json".toMediaType())
 
-        val request = Request.Builder()
-            .url(chatUrl)
-            .header("Authorization", "Bearer $apiKey")
-            .post(body)
-            .build()
+        val request =
+            Request
+                .Builder()
+                .url(chatUrl)
+                .header("Authorization", "Bearer $apiKey")
+                .post(body)
+                .build()
 
         val call = client.newCall(request)
         currentCall = call
-        call.enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                currentCall = null
-                callback(Result(null, e.message))
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                currentCall = null
-                val responseBody = response.body?.string() ?: ""
-                if (!response.isSuccessful && responseBody.isBlank()) {
-                    callback(Result(null, "HTTP ${response.code}"))
-                    return
+        call.enqueue(
+            object : Callback {
+                override fun onFailure(
+                    call: Call,
+                    e: IOException,
+                ) {
+                    currentCall = null
+                    Log.e(TAG, "cleanup request to $chatUrl failed: ${e.message}")
+                    callback(Result(null, e.message))
                 }
-                val parsed = parseResponse(responseBody)
-                val capped = parsed.text?.let { truncatedOutput(it) }
-                callback(if (capped != null) Result(capped, null) else parsed)
-            }
-        })
+
+                override fun onResponse(
+                    call: Call,
+                    response: Response,
+                ) {
+                    currentCall = null
+                    val responseBody = response.body?.string() ?: ""
+                    if (!response.isSuccessful) {
+                        // Log the raw body so logcat debugging shows the real cause;
+                        // surface a compact "HTTP <code>: <detail>" to the caller.
+                        Log.w(TAG, "cleanup HTTP ${response.code} from $chatUrl: ${responseBody.take(500)}")
+                        val detail = runCatching { extractError(JSONObject(responseBody)) }.getOrNull()
+                        callback(Result(null, "HTTP ${response.code}" + (detail?.let { ": $it" } ?: "")))
+                        return
+                    }
+                    val parsed = parseResponse(responseBody)
+                    if (parsed.error != null) {
+                        Log.w(TAG, "cleanup unparseable/error body from $chatUrl: ${parsed.error} — ${responseBody.take(300)}")
+                    }
+                    val capped = parsed.text?.let { truncatedOutput(it) }
+                    callback(if (capped != null) Result(capped, null) else parsed)
+                }
+            },
+        )
     }
 
     /**
      * Dictionary spellings the cleanup model must keep as written. Empty list
      * leaves the prompt unchanged.
      */
-    fun withKeepTerms(prompt: String, terms: List<String>): String {
+    fun withKeepTerms(
+        prompt: String,
+        terms: List<String>,
+    ): String {
         if (terms.isEmpty()) return prompt
         return prompt.rstripTrailing() +
             "\n\nKeep these spellings exactly as written when they appear: " +
             terms.joinToString(", ") + "."
     }
 
-
     /**
      * Per-app tone instruction (WisprFlow-style). Appended as a style directive
      * before the language guard, so "never translate" still wins. Empty/blank
      * leaves the prompt untouched.
      */
-    fun withTone(prompt: String, toneInstruction: String?): String {
+    fun withTone(
+        prompt: String,
+        toneInstruction: String?,
+    ): String {
         val inst = toneInstruction?.trim().orEmpty()
         if (inst.isEmpty()) return prompt
         return prompt.rstripTrailing() + "\n\nStyle: $inst"
     }
+
     /**
      * Ensures the cleanup prompt keeps the original language.
      *
@@ -220,7 +306,10 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
      * — even when the prompt already mentions translation generically — so the
      * model knows WHICH language to keep.
      */
-    fun withLanguageGuard(prompt: String, languageHint: String?): String {
+    fun withLanguageGuard(
+        prompt: String,
+        languageHint: String?,
+    ): String {
         if (!languageHint.isNullOrBlank()) {
             return prompt.rstripTrailing() +
                 "\n\nIMPORTANT: The transcript is in $languageHint. Clean it up in " +
@@ -234,19 +323,41 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
 
     private fun String.rstripTrailing(): String = trimEnd('\n', ' ')
 
-    private fun applyReasoning(bodyJson: JSONObject, chatUrl: String, reasoning: Reasoning) {
+    /**
+     * Reasoning-effort wire format, gated per endpoint.
+     *
+     * Strict providers (Mistral 422 `extra_forbidden`, OpenAI/Groq "unrecognized
+     * argument") REJECT unknown fields, so the "providers ignore unknown fields"
+     * assumption is wrong and broke cleanup for every strict endpoint when
+     * reasoning defaulted to off. Only emit fields where they are documented:
+     *  - OpenRouter: `reasoning` object, {"effort": ...} or {"enabled": false}.
+     *  - Together: hybrids (Qwen3.5/3.6, Gemma4, Cogito, DeepSeek, MiniMax)
+     *    disable via {"reasoning":{"enabled": false}}; effort via
+     *    `reasoning_effort`.
+     *  - OpenAI/Groq: `reasoning_effort` for LOW/MEDIUM/HIGH; OFF sends nothing
+     *    (their non-reasoning models need no toggle).
+     *  - Everyone else (Mistral, Venice, NanoGPT, Custom): send nothing —
+     *    a no-op beats a 422 that kills the whole cleanup request.
+     */
+    internal fun applyReasoning(
+        bodyJson: JSONObject,
+        chatUrl: String,
+        reasoning: Reasoning,
+    ) {
         if (reasoning == Reasoning.DEFAULT) return
+        val isOpenRouter = chatUrl.contains("openrouter.ai")
+        val isTogether = chatUrl.contains("together.ai")
+        val isOpenAiFamily = chatUrl.contains("api.openai.com") || chatUrl.contains("api.groq.com")
         if (reasoning == Reasoning.OFF) {
-            // Together + all hybrids per your screenshot (Qwen3.5/3.6, Gemma4, Cogito, DeepSeek V4 Pro, MiniMax M3):
-            // Hybrid disables via {"reasoning":{"enabled": false}}. Also send for non-Together so gpt-oss etc. stay off.
-            bodyJson.put("reasoning", JSONObject().apply { put("enabled", false) })
+            if (isOpenRouter || isTogether) {
+                bodyJson.put("reasoning", JSONObject().apply { put("enabled", false) })
+            }
             return
         }
-        val isOpenRouter = chatUrl.contains("openrouter.ai")
-        if (isOpenRouter) {
-            bodyJson.put("reasoning", JSONObject().apply { put("effort", reasoning.key) })
-        } else {
-            bodyJson.put("reasoning_effort", reasoning.key)
+        when {
+            isOpenRouter -> bodyJson.put("reasoning", JSONObject().apply { put("effort", reasoning.key) })
+            isTogether || isOpenAiFamily -> bodyJson.put("reasoning_effort", reasoning.key)
+            else -> Unit
         }
     }
 }
