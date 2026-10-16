@@ -189,4 +189,25 @@ class PostProcessorTest {
         val result = PostProcessor.parseResponse("""{"object":"error","message":"Unauthorized","type":"invalid_request_error"}""")
         assertEquals("Unauthorized", result.error)
     }
+
+    // --- Legacy default prompt migration ---
+
+    @Test fun `legacy default prompt detected`() {
+        assertTrue(PostProcessor.isLegacyDefaultPrompt(PostProcessor.LEGACY_DEV_PROMPT))
+        assertTrue(PostProcessor.isLegacyDefaultPrompt(PostProcessor.LEGACY_DEV_PROMPT + "\n  "))
+    }
+
+    @Test fun `new default prompt is not legacy`() {
+        assertTrue(!PostProcessor.isLegacyDefaultPrompt(PostProcessor.DEFAULT_PROMPT))
+        assertTrue(!PostProcessor.isLegacyDefaultPrompt(PostProcessor.SIMPLE_PROMPT))
+        assertTrue(!PostProcessor.isLegacyDefaultPrompt("my custom prompt"))
+        assertTrue(!PostProcessor.isLegacyDefaultPrompt(null))
+    }
+
+    @Test fun `default prompt demands minimal edits and no preamble`() {
+        assertTrue(PostProcessor.DEFAULT_PROMPT.contains("smallest possible edits"))
+        assertTrue(PostProcessor.DEFAULT_PROMPT.contains("No preamble"))
+        assertTrue(PostProcessor.DEFAULT_PROMPT.contains("never add words"))
+        assertTrue(!PostProcessor.DEFAULT_PROMPT.contains("Refine and polish"))
+    }
 }

@@ -14,8 +14,8 @@ android {
         applicationId = "com.julianrottenberg.verbatide"
         minSdk = 30
         targetSdk = 35
-        versionCode = 35
-        versionName = "0.9.20"
+        versionCode = 36
+        versionName = "0.9.21"
 
         ndk { abiFilters += "arm64-v8a" }
     }

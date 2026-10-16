@@ -35,32 +35,32 @@ object ToneManager {
             Tone(
                 "formal",
                 "Formal",
-                "Polished, complete sentences. For official letters or your boss.",
-                "Rewrite the text in a formal, polite register. Complete sentences, no slang, no abbreviations.",
+                "Neutralizes profanity and slang, formal capitalization. Your sentence structure stays untouched.",
+                "Formal register. Replace profanity and slang with neutral equivalents; use formal capitalization (e.g. German nouns capitalized, Sie instead of du). Do not add, drop, or restructure anything else — keep the speaker's sentences and wording intact.",
             ),
             Tone(
                 "casual",
                 "Casual",
-                "Relaxed and friendly, contractions welcome. For chats with friends.",
-                "Rewrite the text in a casual, conversational register. Contractions and informal phrasing are welcome.",
+                "Keeps slang, profanity and contractions as spoken. For chats with friends.",
+                "Casual register. Keep slang, profanity, and contractions exactly as spoken. Change nothing beyond the base cleanup.",
             ),
             Tone(
                 "concise",
                 "Concise",
-                "Strips filler and gets to the point. For quick notes and busy people.",
-                "Make the text as brief as possible while keeping all facts. Remove filler words and redundancies.",
+                "Drops filler words and repetitions only; every fact and your wording stay.",
+                "Delete filler words and redundant repetitions only. Keep every fact and keep the sentence structure; never compress ideas away.",
             ),
             Tone(
                 "email",
                 "Professional email",
                 "Greeting, structured paragraphs, sign-off. Ready to send.",
-                "Format the text as a professional email: short greeting, well-structured paragraphs, appropriate sign-off.",
+                "Format the text as a professional email: short greeting, well-structured paragraphs, appropriate sign-off. Do not change its content, facts, or meaning.",
             ),
             Tone(
                 "technical",
                 "Technical",
                 "Precise register. Identifiers, jargon and code references stay untouched.",
-                "Use a precise technical register. Keep technical terms, identifiers and code references unchanged.",
+                "Keep technical terms, identifiers, and code references exactly as spoken. Fix only transcription errors and punctuation.",
             ),
         )
 

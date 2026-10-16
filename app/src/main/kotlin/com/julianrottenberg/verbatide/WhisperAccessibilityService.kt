@@ -118,6 +118,7 @@ class WhisperAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         instance = this
+        PostProcessor.migrateLegacyDefaultPrompt(this)
         showOverlay()
         updateBubbleVisibility()
         // Try to load local model in background

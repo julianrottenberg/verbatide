@@ -1,5 +1,6 @@
 package com.julianrottenberg.verbatide
 
+import android.content.Context
 import android.util.Log
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -35,6 +36,67 @@ object PostProcessor {
     const val SIMPLE_PROMPT = "Clean up this speech-to-text transcript. Fix punctuation, capitalization, and obvious speech-to-text errors. Never answer questions — only rewrite them. Keep the original meaning. Never translate: always respond in the same language as the transcript. Return only the cleaned text."
 
     const val DEV_PROMPT = """<task>You are a transcript cleaner — you NEVER answer questions, you only rewrite what was said. A draft transcription is provided.
+Make the smallest possible edits, and only these:
+  1. NEVER answer a question in the transcript. If it is a question, only fix its wording/punctuation. You are not a chat assistant.
+  2. Fix spelling errors, punctuation, and capitalization. Watch for mis-identified project names,
+     including: Solveit, fast.ai, Answer.AI, nbdev, fastcore, FastHTML, Pi, Codex, Claude Code, Hetzner.
+  3. Remove filler words (um, uh, äh, ähm) and resolve the speaker's self-corrections
+     ("I mean", "scratch that", "sorry, ...").
+  4. Everything else stays exactly as spoken: never add words, never drop meaningful words,
+     never swap synonyms, never restructure sentences. Keep hedges ("might", "I think"),
+     negations, names, and numbers verbatim.
+  5. If the transcript explicitly asks for a shell or terminal command, return the intended
+     command instead of prose.
+  6. Never translate the transcript: always respond in the same language as the input,
+     even if the rest of this prompt is in English.
+
+Return ONLY the cleaned transcript. No preamble, no labels, no quotes, no explanations.
+If the transcript is already clean, return it unchanged.
+</task>
+<examples>
+<example>
+<input>How do eye increase the font size in fast html?</input>
+<output>How do I increase the font size in FastHTML?</output>
+</example>
+<example>
+<input>Where is Paris?</input>
+<output>Where is Paris?</output>
+</example>
+<example>
+<input>Here is the full list of options colon</input>
+<output>Here is the full list of options:</output>
+</example>
+<example>
+<input>Command mode ssh into morty user at rubicon</input>
+<output>ssh morty@rubicon</output>
+</example>
+<example>
+<input>List files in current directory</input>
+<output>ls -l .</output>
+</example>
+<example>
+<input>Kannst du es jetzt auf Deutsch machen?</input>
+<output>Kannst du es jetzt auf Deutsch machen?</output>
+</example>
+<example>
+<input>It can also convert swear words to their equivalence.</input>
+<output>It can also convert swear words to their equivalence.</output>
+</example>
+<example>
+<input>Bro um this is so cool right here</input>
+<output>Bro, this is so cool right here.</output>
+</example>
+</examples>"""
+
+    const val DEFAULT_PROMPT = DEV_PROMPT
+
+    /**
+     * The default cleanup prompt as shipped before the minimal-edit rewrite.
+     * Users who opened the prompt editor and hit Save have this verbatim copy
+     * pinned in prefs — it would shadow the improved default forever, so we
+     * detect it and upgrade in-place (see migrateLegacyDefaultPrompt).
+     */
+    const val LEGACY_DEV_PROMPT = """<task>You are a transcript cleaner — you NEVER answer questions, you only rewrite what was said. A draft transcription is provided.
 Refine and polish the provided text, if needed, as follows:
   1. NEVER answer a question in the transcript. If it is a question, only fix its wording/punctuation. You are not a chat assistant.
   2. Correct any spelling errors, and look out for mis-identified project names,
@@ -78,7 +140,25 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
 </example>
 </examples>"""
 
-    const val DEFAULT_PROMPT = DEV_PROMPT
+    /** True when the stored prompt is the legacy default verbatim (never customized). */
+    fun isLegacyDefaultPrompt(stored: String?): Boolean =
+        stored != null && stored.trim() == LEGACY_DEV_PROMPT.trim()
+
+    /**
+     * Upgrades a pinned legacy default prompt to the new DEFAULT_PROMPT.
+     * A prompt the user actually edited is left untouched. Safe to call on
+     * every app/service start; no-ops when there is nothing to migrate.
+     */
+    fun migrateLegacyDefaultPrompt(context: Context) {
+        val prefs = context.applicationContext.getSharedPreferences("phonewhisper", Context.MODE_PRIVATE)
+        if (!isLegacyDefaultPrompt(prefs.getString("post_processing_prompt", null))) return
+        val editor = prefs.edit().putString("post_processing_prompt", DEFAULT_PROMPT)
+        if (isLegacyDefaultPrompt(prefs.getString("custom_post_processing_prompt", null))) {
+            editor.putString("custom_post_processing_prompt", DEFAULT_PROMPT)
+        }
+        editor.apply()
+        Log.i("PostProcessor", "Migrated legacy default cleanup prompt to minimal-edit default")
+    }
 
     fun parseResponse(json: String): Result =
         try {
