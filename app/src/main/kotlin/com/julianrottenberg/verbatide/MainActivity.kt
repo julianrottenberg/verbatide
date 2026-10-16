@@ -93,6 +93,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        PostProcessor.migrateLegacyDefaultPrompt(this)
 
         val root = vertical(0, 0)
 
