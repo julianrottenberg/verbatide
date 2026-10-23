@@ -1,3 +1,6 @@
+import java.util.Base64
+
+private val BASE64_DECODER = Base64.getDecoder()
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -34,7 +37,7 @@ android {
         if (!ksB64.isNullOrBlank()) {
             val ksFile = layout.buildDirectory.file("ci-keystore.p12").get().asFile
             ksFile.parentFile.mkdirs()
-            ksFile.writeBytes(java.util.Base64.getDecoder().decode(ksB64))
+            ksFile.writeBytes(BASE64_DECODER.decode(ksB64))
             named("debug") {
                 storeFile = ksFile
                 storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
