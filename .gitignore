@@ -6,3 +6,8 @@ local.properties
 *.apk
 app/src/main/jniLibs/
 .pi/
+
+# Signing material must never be committed
+*.p12
+*.jks
+*.keystore

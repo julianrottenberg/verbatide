@@ -8,7 +8,7 @@
 2. **Read:** this `HANDOFF.md`, `README.md`, `SECURITY.md`, `PRIVACY.md`.
 3. **Builds:** No JDK/Android SDK on the user's host (secureblue, hardened Fedora). **All builds are GitHub Actions** (`.github/workflows/build.yml`). Bump `app/build.gradle.kts` `versionCode`+`versionName`, push + tag `vX.Y.Z`, watch `gh run list --repo julianrottenberg/verbatide`.
 4. **Runtime host:** `secureblue` — uses `run0` not `sudo`, `helium` browser, `zsh+prezto`, `homebrew` at `/home/linuxbrew/.linuxbrew`, `gh` authenticated as `julianrottenberg`.
-5. **Signing:** committed `app/debug.p12` (`PKCS12`, alias `phonewhisper`, pass `android`). Every CI build signs identically → in-place updates. **Do not lose it.** Version codes must be monotonic or Android rejects install.
+5. **Signing:** committed a CI-provided keystore (never committed). Every CI build signs identically → in-place updates. **Do not lose it.** Version codes must be monotonic or Android rejects install.
 6. **Identity:** App is **Verbatide** — `com.julianrottenberg.verbatide`, APK `verbatide-vX.Y.Z.apk`. It is explicitly a **fork of [kafkasl/phone-whisper](https://github.com/kafkasl/phone-whisper)** — keep the "Fork of Phone Whisper by kafkasl" row under `Clear history` and the `Built on Phone Whisper` subtitle in `strings.xml`.
 
 ## 1. What Verbatide is
@@ -21,7 +21,7 @@
 
 ## 2. Architecture (read these files first)
 
-- `app/build.gradle.kts` — `namespace`/`applicationId` = `com.julianrottenberg.verbatide`, `versionCode`/`versionName` (MUST bump), `signingConfigs.debug` uses `debug.p12`, `androidComponents` APK rename (currently broken — see §6), `ndk abiFilters arm64-v8a`, deps include `libs/sherpa-onnx-1.13.5.aar` + `androidx.security:security-crypto`.
+- `app/build.gradle.kts` — `namespace`/`applicationId` = `com.julianrottenberg.verbatide`, `versionCode`/`versionName` (MUST bump), `signingConfigs.debug` reads the keystore from CI env vars, `androidComponents` APK rename (currently broken — see §6), `ndk abiFilters arm64-v8a`, deps include `libs/sherpa-onnx-1.13.5.aar` + `androidx.security:security-crypto`.
 - `app/src/main/AndroidManifest.xml` — `allowBackup=false` + `backup_rules`/`dataExtractionRules`, `networkSecurityConfig`, `RECORD_AUDIO`+`INTERNET` only, `WhisperAccessibilityService` with `BIND_ACCESSIBILITY_SERVICE`, `MainActivity`/`HistoryActivity`/`DictionaryActivity`.
 - `app/src/main/res/xml/{network_security_config,backup_rules,data_extraction_rules,accessibility_service_config}.xml`
 - Kotlin package: `com.julianrottenberg.verbatide` (moved from `com.kafkasl.phonewhisper` at rebrand)

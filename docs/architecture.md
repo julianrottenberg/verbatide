@@ -4,7 +4,7 @@ Excerpt from `HANDOFF.md` §2 (authoritative — this page is a readable mirror)
 
 (read these files first)
 
-- `app/build.gradle.kts` — `namespace`/`applicationId` = `com.julianrottenberg.verbatide`, `versionCode`/`versionName` (MUST bump), `signingConfigs.debug` uses `debug.p12`, `androidComponents` APK rename (currently broken — see §6), `ndk abiFilters arm64-v8a`, deps include `libs/sherpa-onnx-1.13.5.aar` + `androidx.security:security-crypto`.
+- `app/build.gradle.kts` — `namespace`/`applicationId` = `com.julianrottenberg.verbatide`, `versionCode`/`versionName` (MUST bump), `signingConfigs.debug` reads the keystore from CI env vars, `androidComponents` APK rename (currently broken — see §6), `ndk abiFilters arm64-v8a`, deps include `libs/sherpa-onnx-1.13.5.aar` + `androidx.security:security-crypto`.
 - `app/src/main/AndroidManifest.xml` — `allowBackup=false` + `backup_rules`/`dataExtractionRules`, `networkSecurityConfig`, `RECORD_AUDIO`+`INTERNET` only, `WhisperAccessibilityService` with `BIND_ACCESSIBILITY_SERVICE`, `MainActivity`/`HistoryActivity`/`DictionaryActivity`.
 - `app/src/main/res/xml/{network_security_config,backup_rules,data_extraction_rules,accessibility_service_config}.xml`
 - Kotlin package: `com.julianrottenberg.verbatide` (moved from `com.kafkasl.phonewhisper` at rebrand)
@@ -27,4 +27,4 @@ Excerpt from `HANDOFF.md` §2 (authoritative — this page is a readable mirror)
 - `app/src/main/kotlin/com/julianrottenberg/verbatide/` — all app code (moved from `com.kafkasl.phonewhisper` at rebrand).
 - `app/src/main/res/xml/` — `network_security_config.xml` + `backup_rules.xml` + `data_extraction_rules.xml` + `accessibility_service_config.xml`.
 - `app/libs/sherpa-onnx-1.13.5.aar` — native Whisper/Piper runtime.
-- `app/debug.p12` — committed PKCS12 debug keystore (alias `phonewhisper`, pass `android`).
+- Signing keystore is injected by CI at build time (never committed).

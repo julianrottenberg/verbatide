@@ -26,16 +26,22 @@ android {
     }
 
     signingConfigs {
-        // Committed debug keystore so every CI build signs with the SAME key.
-        // Without this, each CI run generates a fresh debug key and Android
-        // refuses in-place updates (signature mismatch). Debug certs are not
-        // security-sensitive; release signing (if ever added) uses secrets.
-        named("debug") {
-            storeFile = file("debug.p12")
-            storePassword = "android"
-            keyAlias = "phonewhisper"
-            keyPassword = "android"
-            storeType = "PKCS12"
+        // The keystore is never committed. CI supplies it via env vars; local
+        // builds fall back to the default Android debug key.
+        // Required CI secrets: ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
+        // ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD.
+        val ksB64 = System.getenv("ANDROID_KEYSTORE_BASE64")
+        if (!ksB64.isNullOrBlank()) {
+            val ksFile = layout.buildDirectory.file("ci-keystore.p12").get().asFile
+            ksFile.parentFile.mkdirs()
+            ksFile.writeBytes(java.util.Base64.getDecoder().decode(ksB64))
+            named("debug") {
+                storeFile = ksFile
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+                storeType = "PKCS12"
+            }
         }
     }
 
