@@ -79,7 +79,14 @@ object SettingsBackup {
     }
 
     /** Key names an export may contain, so import can refuse anything else. */
-    fun isSecretKey(key: String): Boolean = key.matches(Regex("^(api_key|stt_api_key|chat_api_key)(_[a-z0-9_]+)?$"))
+    /**
+     * Provider slots only. The `_owner` stamps are deliberately excluded: they
+     * decide *which* provider may read the shared slot, so an imported
+     * `stt_api_key_owner` plus `stt_chain=custom` would route an existing key to
+     * an attacker-chosen endpoint. Imports must not move credentials around.
+     */
+    fun isSecretKey(key: String): Boolean =
+        key.matches(Regex("^(api_key|stt_api_key|chat_api_key)(_[a-z0-9_]+)?$")) && !key.endsWith("_owner")
 
     /** Returns the number of settings applied, or a failure with the parse error. */
     fun import(

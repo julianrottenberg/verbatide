@@ -132,6 +132,9 @@ object TranscriberClient {
         // Whole-call ceiling: a long dictation gets more room, a short one does
         // not sit for two minutes when the provider is simply stuck.
         call.timeout().timeout(budget, java.util.concurrent.TimeUnit.MILLISECONDS)
+        // Published for cancel(): the stop button and a new dictation must be able
+        // to abort the request that is actually in flight.
+        currentCall = call
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 currentCall = null

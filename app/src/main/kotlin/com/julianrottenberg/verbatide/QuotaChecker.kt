@@ -108,7 +108,12 @@ object QuotaChecker {
         ctx: Context,
         onDone: ((String) -> Unit)?,
     ) {
-        if (running) return
+        // A second request while one is in flight still gets an answer — returning
+        // silently left the caller's "Checking…" subtitle stuck forever.
+        if (running) {
+            onDone?.invoke("check already running")
+            return
+        }
         running = true
         Thread {
             val summary =
@@ -134,8 +139,23 @@ object QuotaChecker {
         val providers = providersToCheck(prefs)
         val parts = mutableListOf<String>()
         for (provider in providers) {
+            // Transcription-only providers have no chat endpoint we could probe
+            // cheaply. Instead of leaving a 24 h block in place until it expires,
+            // release it here: the next dictation is the probe, and at one request
+            // per day a still-empty account costs nothing.
+            if (!provider.supportsChat) {
+                if (SecurePrefs.getSttApiKey(ctx, provider).isBlank()) {
+                    parts += "${provider.displayName}: no transcription key"
+                } else if (ProviderHealth.isBlocked(prefs, provider)) {
+                    ProviderHealth.clear(prefs, provider)
+                    parts += "${provider.displayName}: released, retrying on next use"
+                } else {
+                    parts += "${provider.displayName}: not probed (transcription only)"
+                }
+                continue
+            }
             val apiKey = SecurePrefs.getChatApiKey(ctx, provider)
-            if (apiKey.isBlank() || !provider.supportsChat) {
+            if (apiKey.isBlank()) {
                 parts += "${provider.displayName}: no cleanup key"
                 continue
             }

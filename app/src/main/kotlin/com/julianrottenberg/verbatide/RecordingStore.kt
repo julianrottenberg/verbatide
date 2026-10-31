@@ -108,9 +108,12 @@ object RecordingStore {
         maxFiles: Int,
     ) {
         val keep = keepIds.filter { it.isNotBlank() }.toSet()
-        val files = dir.listFiles()?.filter { it.isFile && it.name.endsWith(".wav") } ?: return
-        val referenced = files.filter { it.name.removeSuffix(".wav") in keep }
-        (files - referenced.toSet()).forEach { runCatching { it.delete() } }
+        val files = dir.listFiles()?.filter { it.isFile } ?: return
+        // Half-written files from an interrupted save belong to no entry; sweep them.
+        files.filter { it.name.endsWith(".tmp") }.forEach { runCatching { it.delete() } }
+        val wavs = files.filter { it.name.endsWith(".wav") }
+        val referenced = wavs.filter { it.name.removeSuffix(".wav") in keep }
+        (wavs - referenced.toSet()).forEach { runCatching { it.delete() } }
         referenced.sortedByDescending { it.lastModified() }.drop(maxFiles.coerceAtLeast(0)).forEach { runCatching { it.delete() } }
     }
 

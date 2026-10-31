@@ -108,13 +108,20 @@ class HistoryActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        reload()
+    }
+
+    /** Re-reads the file, then renders. Only for mutations and resume — the search
+     *  box filters the list it already has. */
+    private fun reload() {
         entries = HistoryManager.load(this).sortedByDescending { it.ts }
         render(search.text.toString().trim())
     }
 
     private fun render(filter: String = "") {
         filtered.removeAllViews()
-        entries = HistoryManager.load(this).sortedByDescending { it.ts }
+        // Filter in memory: re-reading and re-parsing the whole JSON file on every
+        // keystroke of the search box was the reason typing felt heavy.
         val items = entries.filter { filter.isBlank() || it.text.contains(filter, true) || it.summarize().contains(filter, true) }
         if (items.isEmpty()) {
             filtered.addView(
@@ -227,7 +234,7 @@ class HistoryActivity : AppCompatActivity() {
             runOnUiThread {
                 val cleaned = outcome.text
                 if (cleaned.isNullOrBlank()) {
-                    Toast.makeText(this, "Cleanup failed: ${outcome.error}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "Cleanup failed: ${SecurePrefs.redact(outcome.error)}", Toast.LENGTH_LONG).show()
                 } else {
                     HistoryManager.replace(
                         this,
@@ -243,7 +250,7 @@ class HistoryActivity : AppCompatActivity() {
                             failure = "",
                         ),
                     )
-                    render(search.text.toString().trim())
+                    reload()
                     Toast.makeText(this, "Cleaned up again with ${outcome.provider}", Toast.LENGTH_SHORT).show()
                 }
             }
@@ -265,7 +272,7 @@ class HistoryActivity : AppCompatActivity() {
             runOnUiThread {
                 val fresh = outcome.text
                 if (fresh.isNullOrBlank()) {
-                    Toast.makeText(this, "Transcription failed: ${outcome.error}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "Transcription failed: ${SecurePrefs.redact(outcome.error)}", Toast.LENGTH_LONG).show()
                 } else {
                     // The new text is raw again: cleanup has to be re-run to be
                     // true, so the cleanup metadata is cleared rather than kept.
@@ -288,7 +295,7 @@ class HistoryActivity : AppCompatActivity() {
                             failure = "",
                         ),
                     )
-                    render(search.text.toString().trim())
+                    reload()
                     Toast.makeText(this, "Re-transcribed with ${outcome.provider}", Toast.LENGTH_SHORT).show()
                 }
             }
@@ -302,7 +309,7 @@ class HistoryActivity : AppCompatActivity() {
             .setMessage(e.text.take(80) + if (e.text.length > 80) "…" else "")
             .setPositiveButton("Delete") { _, _ ->
                 HistoryManager.removeByTs(this, e.ts)
-                render(search.text.toString().trim())
+                reload()
                 Toast.makeText(this, "Deleted", Toast.LENGTH_SHORT).show()
             }.setNegativeButton("Cancel", null)
             .show()

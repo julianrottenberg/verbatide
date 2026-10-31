@@ -744,8 +744,10 @@ class MainActivity : AppCompatActivity() {
         val acc = WhisperAccessibilityService.instance != null
         val useLocal = prefs().getBoolean("use_local", true)
         val usePostProcessing = prefs().getBoolean("use_post_processing", false)
-        val hasSttKey = SecurePrefs.hasSttApiKey(this)
-        val hasChatKey = SecurePrefs.hasChatApiKey(this)
+        // Ready means "the chain can serve this stage", not "some key exists
+        // somewhere": the dictation path filters chain entries by their scoped key.
+        val hasSttKey = ProviderConfig.chain(prefs(), ProviderConfig.Purpose.STT).any { SecurePrefs.hasSttApiKey(this, it) }
+        val hasChatKey = ProviderConfig.chain(prefs(), ProviderConfig.Purpose.CHAT).any { SecurePrefs.hasChatApiKey(this, it) }
         val hasModel = LocalTranscriber.availableModels(this).isNotEmpty()
         val selectedStt = ProviderConfig.selectedStt(prefs())
         val selectedChat = ProviderConfig.selectedChat(prefs())
@@ -811,9 +813,9 @@ class MainActivity : AppCompatActivity() {
                 Provider.FAL -> "fal.ai key"
                 Provider.MINIMAX -> "MiniMax STT key"
                 Provider.CUSTOM -> "STT API key"
-                else -> "OpenAI STT key"
+                else -> "${selectedStt.displayName} STT key"
             }
-        val sttKey = SecurePrefs.getSttApiKey(this)
+        val sttKey = SecurePrefs.getSttApiKey(this, selectedStt)
         sttKeyRowSub.text =
             if (sttKey.isBlank()) {
                 "Tap to set"
@@ -830,9 +832,9 @@ class MainActivity : AppCompatActivity() {
                 Provider.TOGETHER -> "Together AI cleanup key"
                 Provider.MINIMAX -> "MiniMax cleanup key"
                 Provider.CUSTOM -> "Cleanup API key"
-                else -> "OpenAI cleanup key"
+                else -> "${selectedChat.displayName} cleanup key"
             }
-        val chatKey = SecurePrefs.getChatApiKey(this)
+        val chatKey = SecurePrefs.getChatApiKey(this, selectedChat)
         chatKeyRowSub.text =
             if (chatKey.isBlank()) {
                 "Tap to set"
@@ -909,7 +911,9 @@ class MainActivity : AppCompatActivity() {
         val input =
             EditText(this).apply {
                 this.hint = hint
-                setText(if (isStt) SecurePrefs.getSttApiKey(outer) else SecurePrefs.getChatApiKey(outer))
+                // Scoped read: an unstamped shared slot is invisible to the chain,
+                // so the dialog has to show the key the user will actually be billed on.
+                setText(if (isStt) SecurePrefs.getSttApiKey(outer, provider) else SecurePrefs.getChatApiKey(outer, provider))
                 inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
             }
         android.app.AlertDialog
@@ -918,9 +922,9 @@ class MainActivity : AppCompatActivity() {
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
                 if (isStt) {
-                    SecurePrefs.putSttApiKey(outer, input.text.toString())
+                    SecurePrefs.putSttApiKey(outer, input.text.toString(), provider)
                 } else {
-                    SecurePrefs.putChatApiKey(outer, input.text.toString())
+                    SecurePrefs.putChatApiKey(outer, input.text.toString(), provider)
                 }
                 refresh()
             }.setNegativeButton("Cancel", null)
@@ -1412,7 +1416,7 @@ class MainActivity : AppCompatActivity() {
                         this,
                         wav,
                         rawText,
-                        onProgress = { msg -> runOnUiThread { progress.setMessage(msg) } },
+                        onProgress = { msg -> runOnUiThread { if (!isFinishing && !isDestroyed) progress.setMessage(msg) } },
                         isCancelled = { false },
                     )
                 } catch (e: Exception) {
@@ -1421,6 +1425,9 @@ class MainActivity : AppCompatActivity() {
                 }
             runOnUiThread {
                 benchmarkRunning = false
+                // Rotating or backing out mid-run destroys the window; dismissing
+                // then throws "View not attached to window manager".
+                if (isFinishing || isDestroyed) return@runOnUiThread
                 progress.dismiss()
                 if (report == null) {
                     toast("Benchmark failed — see the diagnostic log")

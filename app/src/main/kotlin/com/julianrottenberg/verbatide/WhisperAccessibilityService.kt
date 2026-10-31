@@ -819,18 +819,11 @@ class WhisperAccessibilityService : AccessibilityService() {
         val p = prefs()
         val sttLanguage = p.getString("stt_language", "auto")
 
-        // Optional: keep the audio so this dictation can be re-transcribed later.
-        // Only when the history is on — the reference lives in the history entry,
-        // and without it the file would be pruned immediately.
+        // Drop the previous dictation's audio handle immediately; the file for this
+        // one is written on the first STT attempt, off the main thread, and only
+        // once we know a provider can actually take the audio.
         pendingRecordingId = null
         pendingRecordingDurMs = 0
-        if (RecordingStore.enabled(p) && HistoryManager.enabled(p)) {
-            val id = "${System.currentTimeMillis()}-${java.util.UUID.randomUUID().toString().take(8)}"
-            if (RecordingStore.save(this, id, wav) != null) {
-                pendingRecordingId = id
-                pendingRecordingDurMs = ((wav.size - 44).coerceAtLeast(0) / 32)
-            }
-        }
         // Chain order, minus providers the usage check already knows are dry.
         val usable =
             ProviderHealth
@@ -855,6 +848,24 @@ class WhisperAccessibilityService : AccessibilityService() {
     }
 
     /**
+     * Writes this dictation's WAV when the user opted into keeping audio.
+     *
+     * Called from the first STT attempt, which already runs off the main thread:
+     * a 25 MB encode-and-write on the UI thread would drop frames right when the
+     * user expects the text to appear. The file is written before the request so
+     * a failed dictation is still retryable, and the id is only published once
+     * the write actually succeeded.
+     */
+    private fun saveAudio(wav: ByteArray) {
+        val p = prefs()
+        if (!RecordingStore.enabled(p) || !HistoryManager.enabled(p)) return
+        val id = "${System.currentTimeMillis()}-${java.util.UUID.randomUUID().toString().take(8)}"
+        if (RecordingStore.save(this, id, wav) == null) return
+        pendingRecordingId = id
+        pendingRecordingDurMs = (wav.size - 44).coerceAtLeast(0) / 32
+    }
+
+    /**
      * Tries [usable] in order, moving to the next provider when this one is out
      * of quota or its key is rejected — that is the whole backup-provider rule.
      */
@@ -864,6 +875,9 @@ class WhisperAccessibilityService : AccessibilityService() {
         index: Int,
         sttLanguage: String?,
     ) {
+        // First attempt only: keep the audio once, on this background thread, so a
+        // long dictation never stalls the UI and a retry chain writes one file.
+        if (index == 0) saveAudio(wav)
         val provider =
             usable.getOrNull(index) ?: run {
                 finishTranscriptionError("No transcription provider available")
@@ -976,11 +990,15 @@ class WhisperAccessibilityService : AccessibilityService() {
     ): Boolean {
         val failure = ProviderHealth.classify(error)
         if (failure == ProviderHealth.Failure.OTHER) return false
-        val next = candidates.getOrNull(index + 1) ?: return false
-        // Only pause the provider when there *is* a fallback: on the last
-        // provider a 402/401 still deserves a 24 h block (nothing else to try),
-        // but a transient-looking one-off should not.
+        // Block on quota/auth even at the end of the chain: a dry account with
+        // nothing to fall back to would otherwise burn a doomed request per
+        // dictation and keep showing as usable.
+        val next = candidates.getOrNull(index + 1)
+        if (next == null && failure == ProviderHealth.Failure.OTHER) return false
         ProviderHealth.block(prefs(), provider, error ?: failure.name.lowercase())
+        // Last provider in the chain: the caller reports the failure, so there is
+        // nobody to hand over to — stop here.
+        if (next == null) return false
         Log.w(TAG, "${provider.displayName} unusable (${SecurePrefs.redact(error)}) — switching to ${next.displayName}")
         LogStore.add(TAG, "Switch: ${provider.displayName} → ${next.displayName} (${failure.name.lowercase()})")
         handler.post { toast("${provider.displayName} unavailable — trying ${next.displayName}") }
@@ -1107,6 +1125,9 @@ class WhisperAccessibilityService : AccessibilityService() {
         index: Int,
         stt: HistoryEntry,
     ) {
+        // Cleanup runs after STT, so a cancel between the two stages must not let
+        // this callback inject text into whatever field is focused by then.
+        val token = attemptToken
         val provider =
             usable.getOrNull(index) ?: run {
                 handler.post {
@@ -1141,6 +1162,7 @@ class WhisperAccessibilityService : AccessibilityService() {
             toneInstruction = ToneManager.instructionFor(this@WhisperAccessibilityService, pendingTargetPackage),
         ) { result ->
             handler.post {
+                if (token != attemptToken) return@post
                 val cleaned = result.text
                 if (!cleaned.isNullOrBlank()) {
                     ProviderHealth.clear(prefs(), provider)
@@ -1177,9 +1199,9 @@ class WhisperAccessibilityService : AccessibilityService() {
                 } else {
                     // Surface the actual cause (HTTP code, provider message) so
                     // "cleanup doesn't work" is debuggable from the toast alone.
-                    Log.w(TAG, "Cleanup failed, falling back to raw text: ${result.error}")
-                    LogStore.add(TAG, "Cleanup ${provider.displayName} failed: ${result.error}")
-                    val reason = result.error?.let { if (it.length > 90) it.take(90) + "…" else it }
+                    val reason = SecurePrefs.redact(result.error).take(90).ifBlank { null }
+                    Log.w(TAG, "Cleanup failed, falling back to raw text: $reason")
+                    LogStore.add(TAG, "Cleanup ${provider.displayName} failed: ${SecurePrefs.redact(result.error)}")
                     injectText(
                         text,
                         feedback = if (reason != null) "Cleanup failed: $reason" else "Cleanup failed — raw copied to clipboard",
@@ -1219,15 +1241,21 @@ class WhisperAccessibilityService : AccessibilityService() {
             model = model,
             fallbackDepth = fallbackDepth,
             sttMs = sttMs,
-            recording = pendingRecordingId ?: "",
-            durMs = pendingRecordingDurMs,
+            // Only claim the file if it is actually there (a failed write or a
+            // pruned file must not leave a dangling reference in the history).
+            recording = pendingRecordingId?.takeIf { RecordingStore.fileFor(this, it).isFile } ?: "",
+            durMs = if (pendingRecordingId?.let { RecordingStore.fileFor(this, it).isFile } == true) pendingRecordingDurMs else 0,
         )
 
     private fun record(e: HistoryEntry) {
-        HistoryManager.append(this, e)
-        // The entry now owns the audio file; a second dictation must not reuse it.
+        // Hand the file reference over before the write: the entry owns it even if
+        // the append happens on another thread.
         pendingRecordingId = null
         pendingRecordingDurMs = 0
+        // History is a full read + rewrite of the JSON file plus a recordings-dir
+        // scan. Doing that on the main thread inside someone else's app is how you
+        // get a dropped frame at the exact moment the text lands.
+        thread { HistoryManager.append(this, e) }
     }
 
     private fun reset(msg: String) {

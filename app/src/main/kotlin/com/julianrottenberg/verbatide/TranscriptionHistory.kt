@@ -136,10 +136,14 @@ object HistoryManager {
         }
 
     fun clear(ctx: Context) {
-        try {
-            historyFile(ctx).delete()
-            RecordingStore.clear(ctx)
-        } catch (_: Exception) {
+        // Same monitor as append/replace/remove: a clear that races an append used
+        // to leave the file deleted but the audio referenced (or vice versa).
+        synchronized(this) {
+            try {
+                historyFile(ctx).delete()
+                RecordingStore.clear(ctx)
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -158,9 +162,10 @@ object HistoryManager {
     ) {
         synchronized(this) {
             val all = load(ctx)
-            all.filter { it.ts == ts }.forEach { RecordingStore.delete(ctx, it.recording) }
             val entries = all.filter { it.ts != ts }
+            // JSON first: if the write fails the entry stays and so must its audio.
             writeArray(ctx, JSONArray(entries.map { toJson(it) }))
+            all.filter { it.ts == ts }.forEach { RecordingStore.delete(ctx, it.recording) }
         }
     }
 
@@ -222,6 +227,10 @@ object HistoryManager {
         return try {
             JSONArray(file.readText())
         } catch (_: Exception) {
+            // Unparseable (truncated write, hand-restored backup). Move it aside
+            // first: returning an empty array means the next append rewrites the
+            // file, which would silently destroy every dictation in it.
+            runCatching { file.renameTo(File(file.parentFile, file.name + ".corrupt")) }
             JSONArray()
         }
     }

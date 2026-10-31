@@ -146,12 +146,26 @@ object SecurePrefs {
         ctx: Context,
         key: String,
     ): String {
-        val store = encryptedPrefsOrNull(ctx) ?: plainPrefs(ctx)
-        if (store.contains(key)) return store.getString(key, "") ?: ""
-        if ((key == KEY_STT_API_KEY || key == KEY_CHAT_API_KEY) && store.contains(KEY_API_KEY)) {
-            return store.getString(KEY_API_KEY, "") ?: ""
+        val enc = encryptedPrefsOrNull(ctx)
+        if (enc != null) {
+            try {
+                if (enc.contains(key)) return enc.getString(key, "") ?: ""
+                if ((key == KEY_STT_API_KEY || key == KEY_CHAT_API_KEY) && enc.contains(KEY_API_KEY)) {
+                    return enc.getString(KEY_API_KEY, "") ?: ""
+                }
+                return ""
+            } catch (_: Exception) {
+                // Unreadable encrypted value: retry the store next time, and read
+                // the plain file now so a restore does not crash the service.
+                encryptedPrefs = null
+            }
         }
-        return ""
+        val plain = plainPrefs(ctx)
+        return try {
+            plain.getString(key, "") ?: ""
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     /** No legacy fallback: "the slot as stored", used internally. */
@@ -159,8 +173,22 @@ object SecurePrefs {
         ctx: Context,
         key: String,
     ): String {
-        val store = encryptedPrefsOrNull(ctx) ?: plainPrefs(ctx)
-        return store.getString(key, "") ?: ""
+        val enc = encryptedPrefsOrNull(ctx)
+        if (enc != null) {
+            try {
+                return enc.getString(key, "") ?: ""
+            } catch (_: Exception) {
+                // Keystore value unreadable under us (restored app data, reset
+                // key). Drop the handle so the next call retries creation
+                // instead of downgrading every later read to plaintext.
+                encryptedPrefs = null
+            }
+        }
+        return try {
+            plainPrefs(ctx).getString(key, "") ?: ""
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     fun putKey(
@@ -171,19 +199,25 @@ object SecurePrefs {
         val trimmed = value.trim()
         val enc = encryptedPrefsOrNull(ctx)
         if (enc != null) {
-            if (trimmed.isBlank()) {
-                enc.edit().remove(key).apply()
-            } else {
-                enc.edit().putString(key, trimmed).apply()
+            try {
+                if (trimmed.isBlank()) {
+                    enc.edit().remove(key).apply()
+                } else {
+                    enc.edit().putString(key, trimmed).apply()
+                }
+                plainPrefs(ctx).edit().remove(key).apply()
+                return
+            } catch (_: Exception) {
+                // Write failed: keep the value in plain prefs rather than losing
+                // it, and drop the handle so the next call retries the keystore.
+                encryptedPrefs = null
             }
-            plainPrefs(ctx).edit().remove(key).apply()
+        }
+        val plain = plainPrefs(ctx)
+        if (trimmed.isBlank()) {
+            plain.edit().remove(key).apply()
         } else {
-            val plain = plainPrefs(ctx)
-            if (trimmed.isBlank()) {
-                plain.edit().remove(key).apply()
-            } else {
-                plain.edit().putString(key, trimmed).apply()
-            }
+            plain.edit().putString(key, trimmed).apply()
         }
     }
 

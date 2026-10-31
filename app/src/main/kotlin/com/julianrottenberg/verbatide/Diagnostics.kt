@@ -41,13 +41,21 @@ object LogStore {
         synchronized(this) {
             buffer.add(line)
             while (buffer.size > MAX_LINES) buffer.removeAt(0)
-            if (++sinceTrim >= 25) {
+            val file = pendingFile
+            if (file == null) {
+                // No Context yet: keep the line so attach() can flush it.
+                pendingLines.add(line)
+            } else if (++sinceTrim >= 25) {
+                // Batched on purpose (one append per 25 lines to spare flash), but
+                // the flush must carry the whole batch — writing only the current
+                // line left the file with 4% of the trace and grew pendingLines
+                // forever in a service that never restarts.
                 sinceTrim = 0
-                pendingFile?.let { appendToFile(it, line) }
+                val batch = pendingLines.toList() + line
+                pendingLines.clear()
+                appendToFile(file, batch.joinToString("\n"))
             } else {
-                if (pendingFile != null) {
-                    pendingLines.add(line)
-                }
+                pendingLines.add(line)
             }
         }
     }
