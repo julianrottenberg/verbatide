@@ -44,7 +44,7 @@ class FallbackProviderTest {
         ProviderHealth.block(p, Provider.MINIMAX, "401", t0)
         assertEquals(
             listOf(Provider.MISTRAL, Provider.MINIMAX),
-            ProviderHealth.chain(p, Provider.MISTRAL, t0 + 1_000),
+            ProviderHealth.order(p, ProviderConfig.Purpose.STT, t0 + 1_000),
         )
     }
 
@@ -55,7 +55,7 @@ class FallbackProviderTest {
         assertNull(ProviderHealth.blocked(p, Provider.MISTRAL, t0 + ProviderHealth.BLOCK_TTL_MS + 1))
         assertEquals(
             listOf(Provider.MISTRAL, Provider.MINIMAX),
-            ProviderHealth.chain(p, Provider.MISTRAL, t0 + ProviderHealth.BLOCK_TTL_MS + 1),
+            ProviderHealth.order(p, ProviderConfig.Purpose.STT, t0 + ProviderHealth.BLOCK_TTL_MS + 1),
         )
     }
 
@@ -90,12 +90,81 @@ class FallbackProviderTest {
         assertEquals(listOf(Provider.OPENAI, Provider.MINIMAX), ProviderHealth.chatChain(p))
     }
 
-    // --- what may be a backup ---------------------------------------------
+    // --- explicit chains ---------------------------------------------------
 
-    @Test fun onlyDualPurposeProvidersQualifyAsBackup() {
-        assertTrue(Provider.FAL !in ProviderConfig.backupProviders)
-        assertTrue(Provider.CUSTOM !in ProviderConfig.backupProviders)
-        assertTrue(Provider.MINIMAX in ProviderConfig.backupProviders)
+    @Test fun storedChainBeatsTheLegacyKeys() {
+        val p =
+            FakePrefs(
+                mapOf(
+                    "stt_provider" to "mistral",
+                    "backup_provider" to "minimax",
+                    "stt_chain" to "openai,mistral,venice",
+                ),
+            )
+        assertEquals(
+            listOf(Provider.OPENAI, Provider.MISTRAL, Provider.VENICE),
+            ProviderConfig.chain(p, ProviderConfig.Purpose.STT),
+        )
+    }
+
+    @Test fun chainDropsEntriesThePurposeCannotUse() {
+        // fal.ai has no chat endpoint, so a chat chain must not keep it.
+        val p = FakePrefs(mapOf("chat_chain" to "mistral,fal,custom"))
+        assertEquals(
+            listOf(Provider.MISTRAL, Provider.CUSTOM),
+            ProviderConfig.chain(p, ProviderConfig.Purpose.CHAT),
+        )
+    }
+
+    @Test fun selectingAProviderMakesItPrimaryAndKeepsTheRest() {
+        val p = FakePrefs(mapOf("stt_chain" to "mistral,minimax,venice"))
+        ProviderConfig.select(p, ProviderConfig.Purpose.STT, Provider.VENICE)
+        assertEquals(
+            listOf(Provider.VENICE, Provider.MISTRAL, Provider.MINIMAX),
+            ProviderConfig.chain(p, ProviderConfig.Purpose.STT),
+        )
+    }
+
+    @Test fun appendAndRemoveKeepTheChainNonEmpty() {
+        val p = FakePrefs(mapOf("chat_chain" to "mistral"))
+        ProviderConfig.appendToChain(p, ProviderConfig.Purpose.CHAT, Provider.MINIMAX)
+        assertEquals(
+            listOf(Provider.MISTRAL, Provider.MINIMAX),
+            ProviderConfig.chain(p, ProviderConfig.Purpose.CHAT),
+        )
+        ProviderConfig.removeFromChain(p, ProviderConfig.Purpose.CHAT, Provider.MISTRAL)
+        assertEquals(
+            listOf(Provider.MINIMAX),
+            ProviderConfig.chain(p, ProviderConfig.Purpose.CHAT),
+        )
+        // Removing the last one is refused — the pipeline needs a target.
+        ProviderConfig.removeFromChain(p, ProviderConfig.Purpose.CHAT, Provider.MINIMAX)
+        assertEquals(
+            listOf(Provider.MINIMAX),
+            ProviderConfig.chain(p, ProviderConfig.Purpose.CHAT),
+        )
+    }
+
+    @Test fun chainsAreIndependentBetweenPurposes() {
+        val p = FakePrefs(mapOf("stt_chain" to "mistral,minimax"))
+        ProviderConfig.select(p, ProviderConfig.Purpose.CHAT, Provider.OPENAI)
+        assertEquals(
+            listOf(Provider.MISTRAL, Provider.MINIMAX),
+            ProviderConfig.chain(p, ProviderConfig.Purpose.STT),
+        )
+        assertEquals(listOf(Provider.OPENAI), ProviderConfig.chain(p, ProviderConfig.Purpose.CHAT))
+    }
+
+    @Test fun legacyBackupBecomesTheSecondChainEntry() {
+        val p = prefs(stt = Provider.MISTRAL, chat = Provider.OPENROUTER, backup = Provider.MINIMAX)
+        assertEquals(
+            listOf(Provider.MISTRAL, Provider.MINIMAX),
+            ProviderConfig.chain(p, ProviderConfig.Purpose.STT),
+        )
+        assertEquals(
+            listOf(Provider.OPENROUTER, Provider.MINIMAX),
+            ProviderConfig.chain(p, ProviderConfig.Purpose.CHAT),
+        )
     }
 
     // --- which failures justify switching ----------------------------------

@@ -27,7 +27,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusSubtitle: TextView
     private lateinit var audioRowSub: TextView
     private lateinit var accRowSub: TextView
-
+    private lateinit var keepAudioSub: TextView
+    private lateinit var audioCapSub: TextView
     // Legacy single-key row — hidden since v0.6.0, kept for refresh() compat.
     private lateinit var keyRowSub: TextView
     private lateinit var keyRowTitle: TextView
@@ -55,9 +56,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var reasoningRow: LinearLayout
     private lateinit var languageRow: LinearLayout
     private lateinit var languageRowSub: TextView
-    private lateinit var backupRowSub: TextView
+    private lateinit var sttChainRowSub: TextView
+    private lateinit var chatChainRowSub: TextView
     private lateinit var usageRowSub: TextView
-    private lateinit var backupKeyRowSub: TextView
+    private lateinit var logsRowSub: TextView
 
     // SAF launchers for settings backup/restore. Must be field initializers so
     // they register before the activity is created.
@@ -312,28 +314,63 @@ class MainActivity : AppCompatActivity() {
         chatProviderContainer.addView(chatKeyRow)
         root.addView(chatProviderContainer)
 
-        // --- Fallback provider ---
-        // One account funds both halves, so a single choice covers STT *and*
-        // cleanup. Shown even when local STT is active: cleanup still needs it.
-        root.addView(sectionHeader("Fallback"))
-        val backupRow = settingsRow("Backup provider", ProviderConfig.backupSummary(prefs())) { promptBackupProvider() }
-        backupRowSub = backupRow.findViewWithTag("subtitle")
-        root.addView(backupRow)
-        // The backup's account is a *different* account, so it needs its own key
-        // slot — one value feeds both its STT and its cleanup endpoint.
-        val backupKeyRow = settingsRow("Backup key", backupKeySubtitle()) { promptBackupKey() }
-        backupKeyRowSub = backupKeyRow.findViewWithTag("subtitle")
-        root.addView(backupKeyRow)
+        // --- Failover chains ---
+        // Each half of the pipeline keeps its own ordered list, so a dry account
+        // can be replaced without touching the other stage. Shown even when local
+        // STT is active: cleanup still needs its chain.
+        root.addView(sectionHeader("Fallbacks"))
+        val sttChainRow =
+            settingsRow("Transcription chain", chainSubtitle(ProviderConfig.Purpose.STT)) {
+                promptChain(ProviderConfig.Purpose.STT)
+            }
+        sttChainRowSub = sttChainRow.findViewWithTag("subtitle")
+        sttChainRowSub.maxLines = 3
+        root.addView(sttChainRow)
 
-        val usageRow = settingsRow("Usage check", QuotaChecker.describe(prefs())) { checkUsageNow() }
+        val chatChainRow =
+            settingsRow("Cleanup chain", chainSubtitle(ProviderConfig.Purpose.CHAT)) {
+                promptChain(ProviderConfig.Purpose.CHAT)
+            }
+        chatChainRowSub = chatChainRow.findViewWithTag("subtitle")
+        chatChainRowSub.maxLines = 3
+        root.addView(chatChainRow)
+
+        root.addView(sectionHeader("Usage & logs"))
+
+        val usageRow = settingsRow("Check usage now", QuotaChecker.describe(prefs())) { checkUsageNow() }
         usageRowSub = usageRow.findViewWithTag("subtitle")
+        usageRowSub.maxLines = 3
         root.addView(usageRow)
 
+        val benchRow =
+            settingsRow("Benchmark providers", "Time every key against your own audio") {
+                startBenchmark()
+            }
+        root.addView(benchRow)
+        val logsRow = settingsRow("Activity log", "What the last dictations did") { showLogs() }
+        logsRowSub = logsRow.findViewWithTag("subtitle")
+        root.addView(logsRow)
+
+        // Separate from the activity log: this one is the raw attempt trace
+        // (which provider, how long, why it failed) — the "why" without adb.
+        val diagRow = settingsRow("Diagnostic log", "Provider attempts, timings and errors") { showDiagnostics() }
+        root.addView(diagRow)
         // --- Backup & restore ---
         root.addView(sectionHeader("Backup & restore"))
         root.addView(
             settingsRow("Export settings", "Save endpoints, prompts & preferences to a file") {
-                exportLauncher.launch("verbatide-backup.json")
+                android.app.AlertDialog
+                    .Builder(this)
+                    .setTitle("Export settings")
+                    .setItems(
+                        arrayOf(
+                            "Settings only",
+                            "Settings + API keys (plaintext file)",
+                        ),
+                    ) { _, which ->
+                        exportWithKeys = which == 1
+                        exportLauncher.launch(if (exportWithKeys) "verbatide-backup-with-keys.json" else "verbatide-backup.json")
+                    }.show()
             },
         )
         root.addView(
@@ -411,11 +448,11 @@ class MainActivity : AppCompatActivity() {
             }
         val row =
             settingsRow(provider.displayName, subtitle, radio) {
-                if (isStt) {
-                    ProviderConfig.saveSttProvider(prefs(), provider)
-                } else {
-                    ProviderConfig.saveChatProvider(prefs(), provider)
-                }
+                ProviderConfig.select(
+                    prefs(),
+                    if (isStt) ProviderConfig.Purpose.STT else ProviderConfig.Purpose.CHAT,
+                    provider,
+                )
                 refresh()
             }
         // Retag so we can refresh selection state — key on (provider, side).
@@ -715,6 +752,8 @@ class MainActivity : AppCompatActivity() {
 
         audioRowSub.text = if (audio) "Granted" else "Tap to grant permission"
         accRowSub.text = if (acc) "Enabled" else "Tap to enable in settings"
+        keepAudioSub.text = keepAudioSummary()
+        audioCapSub.text = audioCapSummary()
 
         // Visibility — STT and cleanup are independent so users can mix
         // (e.g. fal.ai for transcription + Together AI for cleanup).
@@ -735,9 +774,10 @@ class MainActivity : AppCompatActivity() {
         // Provider summary + radio states
         providerSummarySub.text = ProviderConfig.sttSummary(prefs())
         chatSummarySub.text = ProviderConfig.chatSummary(prefs())
-        backupRowSub.text = ProviderConfig.backupSummary(prefs())
-        backupKeyRowSub.text = backupKeySubtitle()
+        sttChainRowSub.text = chainSubtitle(ProviderConfig.Purpose.STT)
+        chatChainRowSub.text = chainSubtitle(ProviderConfig.Purpose.CHAT)
         usageRowSub.text = QuotaChecker.describe(prefs())
+        logsRowSub.text = logsSummary()
         refreshProviderRows()
 
         customSttUrlSub.text = providerCustomSttUrlSubtitle()
@@ -1059,44 +1099,118 @@ class MainActivity : AppCompatActivity() {
 
     // --- Fallback provider + usage check ---
 
-    private fun promptBackupProvider() {
-        val options = listOf<Provider?>(null) + ProviderConfig.backupProviders
-        val labels = options.map { it?.displayName ?: "None" }.toTypedArray()
-        val current = options.indexOf(ProviderConfig.backupProvider(prefs())).coerceAtLeast(0)
+    /**
+     * One line per chain: primary, then the fallbacks in the order they are
+     * tried. Shows the dry marker so a skipped provider isn't a mystery.
+     */
+    private fun chainSubtitle(purpose: ProviderConfig.Purpose): String {
+        val chain = ProviderConfig.chain(prefs(), purpose)
+        if (chain.size == 1) {
+            return "${chain.first().displayName} only — tap to add a fallback"
+        }
+        return chain.joinToString(" → ") { p ->
+            if (ProviderHealth.isBlocked(prefs(), p)) "${p.displayName} (no usage)" else p.displayName
+        }
+    }
+
+    private fun promptChain(purpose: ProviderConfig.Purpose) {
+        val chain = ProviderConfig.chain(prefs(), purpose)
+        val labels =
+            chain.mapIndexed { i, p ->
+                val mark = if (i == 0) "1 (primary)" else "${i + 1}"
+                val dry = if (ProviderHealth.isBlocked(prefs(), p)) " · no usage" else ""
+                "$mark  ${p.displayName}$dry"
+            } + "Add provider…"
         android.app.AlertDialog
             .Builder(this)
-            .setTitle("Backup provider")
-            .setSingleChoiceItems(labels, current) { dialog, which ->
-                dialog.dismiss()
-                val picked = options[which]
-                val primary = listOf(ProviderConfig.selectedStt(prefs()), ProviderConfig.selectedChat(prefs()))
-                if (picked != null && picked in primary) {
-                    toast("${picked.displayName} is already the primary — pick another")
-                    return@setSingleChoiceItems
+            .setTitle(purpose.label + " chain")
+            .setItems(labels.toTypedArray()) { _, which ->
+                if (which == labels.size - 1) {
+                    promptAddToChain(purpose)
+                } else {
+                    promptChainEntry(purpose, chain[which])
                 }
-                ProviderConfig.saveBackupProvider(prefs(), picked)
+            }.setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun promptChainEntry(
+        purpose: ProviderConfig.Purpose,
+        provider: Provider,
+    ) {
+        val chain = ProviderConfig.chain(prefs(), purpose)
+        val index = chain.indexOf(provider)
+        val isPrimary = index == 0
+        val entries = mutableListOf<String>()
+        if (!isPrimary) entries += "Make primary"
+        if (index > 0) entries += "Move up"
+        if (index in 0 until chain.lastIndex) entries += "Move down"
+        entries += if (SecurePrefs.hasApiKey(this, provider)) "Change key…" else "Set key…"
+        // The chain must never empty, so the only entry offers no Remove.
+        if (chain.size > 1) entries += "Remove"
+        android.app.AlertDialog
+            .Builder(this)
+            .setTitle(provider.displayName)
+            .setItems(entries.toTypedArray()) { _, which ->
+                when (val action = entries[which]) {
+                    "Make primary" -> {
+                        ProviderConfig.select(prefs(), purpose, provider)
+                    }
+
+                    "Move up" -> {
+                        ProviderConfig.moveInChain(prefs(), purpose, provider, -1)
+                    }
+
+                    "Move down" -> {
+                        ProviderConfig.moveInChain(prefs(), purpose, provider, 1)
+                    }
+
+                    "Remove" -> {
+                        ProviderConfig.removeFromChain(prefs(), purpose, provider)
+                    }
+
+                    else -> {
+                        if (action.startsWith("Set key") || action.startsWith("Change key")) {
+                            promptKeyFor(provider) {}
+                        }
+                    }
+                }
                 refresh()
             }.setNegativeButton("Cancel", null)
             .show()
     }
-    /** One key per backup account: `asr-1.0` and the chat endpoint bill together. */
-    private fun backupKeySubtitle(): String {
-        val provider = ProviderConfig.backupProvider(prefs()) ?: return "Pick a backup provider first"
-        val stt = SecurePrefs.hasSttApiKey(this, provider)
-        val chat = SecurePrefs.hasChatApiKey(this, provider)
-        return when {
-            stt && chat -> "${provider.displayName} key set — covers STT and cleanup"
-            stt || chat -> "${provider.displayName} key only covers ${if (stt) "STT" else "cleanup"}"
-            else -> "Tap to add ${provider.displayName}'s key"
-        }
-    }
 
-    private fun promptBackupKey() {
-        val provider = ProviderConfig.backupProvider(prefs())
-        if (provider == null) {
-            toast("Pick a backup provider first")
+    private fun promptAddToChain(purpose: ProviderConfig.Purpose) {
+        val chain = ProviderConfig.chain(prefs(), purpose)
+        val available = purpose.eligible().filter { it !in chain }
+        if (available.isEmpty()) {
+            toast("Every provider is already in the chain")
             return
         }
+        android.app.AlertDialog
+            .Builder(this)
+            .setTitle("Add to ${purpose.label.lowercase()} chain")
+            .setItems(available.map { it.displayName }.toTypedArray()) { _, which ->
+                ProviderConfig.appendToChain(prefs(), purpose, available[which])
+                if (SecurePrefs.hasApiKey(this, available[which])) {
+                    refresh()
+                } else {
+                    // A provider in the chain with no key would just be skipped at
+                    // dictation time, so ask for it right away.
+                    promptKeyFor(available[which]) { refresh() }
+                }
+            }.setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /**
+     * Key dialog for one specific provider. Writes both slots of that account so
+     * a single paste covers transcription and cleanup.
+     */
+    private fun promptKeyFor(
+        provider: Provider,
+        onSaved: () -> Unit,
+    ) {
         val hint =
             when (provider) {
                 Provider.MINIMAX -> "JWT from platform.minimax.io"
@@ -1106,7 +1220,45 @@ class MainActivity : AppCompatActivity() {
                 else -> "sk-..."
             }
         val outer = this
-        val existing = SecurePrefs.getSttApiKey(outer, provider).ifBlank { SecurePrefs.getChatApiKey(outer, provider) }
+        val sttKey = SecurePrefs.getSttApiKey(outer, provider)
+        val chatKey = SecurePrefs.getChatApiKey(outer, provider)
+        // Most accounts use one key for both endpoints, but a user who pasted
+        // different keys must not have them silently collapsed into one.
+        if (sttKey.isNotBlank() && chatKey.isNotBlank() && sttKey != chatKey) {
+            val targets = listOf("Transcription key", "Cleanup key", "Both")
+            android.app.AlertDialog
+                .Builder(this)
+                .setTitle("${provider.displayName} key")
+                .setMessage("This provider has separate keys for transcription and cleanup.")
+                .setItems(targets.toTypedArray()) { _, which ->
+                    promptKeyValue(provider, targets[which], onSaved)
+                }.setNegativeButton("Cancel", null)
+                .show()
+            return
+        }
+        promptKeyValue(provider, "Both", onSaved)
+    }
+
+    /**
+     * One key input for [provider]. [target] narrows the write to a single slot
+     * for accounts whose transcription and cleanup keys differ.
+     */
+    private fun promptKeyValue(
+        provider: Provider,
+        target: String,
+        onSaved: () -> Unit,
+    ) {
+        val hint =
+            when (provider) {
+                Provider.MINIMAX -> "JWT from platform.minimax.io"
+                Provider.GROQ -> "gsk_..."
+                Provider.OPENROUTER -> "sk-or-..."
+                Provider.TOGETHER -> "tgp_..."
+                else -> "sk-..."
+            }
+        val outer = this
+        val existing =
+            SecurePrefs.getSttApiKey(outer, provider).ifBlank { SecurePrefs.getChatApiKey(outer, provider) }
         val input =
             EditText(this).apply {
                 this.hint = hint
@@ -1115,17 +1267,79 @@ class MainActivity : AppCompatActivity() {
             }
         android.app.AlertDialog
             .Builder(this)
-            .setTitle("${provider.displayName} backup key")
+            .setTitle(if (target == "Both") "${provider.displayName} key" else "$target — ${provider.displayName}")
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
                 val value = input.text.toString()
-                // Written to the provider's own slots, never the shared ones, so
-                // the primary's key stays untouched.
-                SecurePrefs.putSttApiKey(outer, value, provider)
-                SecurePrefs.putChatApiKey(outer, value, provider)
-                refresh()
+                if (target != "Cleanup key") SecurePrefs.putSttApiKey(outer, value, provider)
+                if (target != "Transcription key") SecurePrefs.putChatApiKey(outer, value, provider)
+                onSaved()
             }.setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun logsSummary(): String {
+        val entries = HistoryManager.load(this)
+        if (entries.isEmpty()) return "No dictations yet"
+        return "${entries.size} dictations · newest ${HistoryEntry.age(entries.first().ts)}"
+    }
+
+    private fun showLogs() {
+        val entries = HistoryManager.load(this)
+        if (entries.isEmpty()) {
+            toast("No dictations yet")
+            return
+        }
+        val body = StringBuilder()
+        entries.take(60).forEach { e ->
+            body
+                .append(HistoryEntry.age(e.ts))
+                .append("  ·  ")
+                .append(e.summarize())
+                .append('\n')
+            body.append("  ").append(e.text.take(400).replace("\n", " "))
+            body.append("\n\n")
+        }
+        val text = body.toString().trim()
+        android.app.AlertDialog
+            .Builder(this)
+            .setTitle("Activity log")
+            .setMessage(text)
+            .setPositiveButton("Copy") { _, _ ->
+                copyToClipboard(text)
+                toast("Copied")
+            }.setNegativeButton("Close", null)
+            .show()
+    }
+
+    /**
+     * The raw attempt trace: which provider ran, for how long, and what came
+     * back. Dictation failures happen in other apps, so this is the only
+     * in-product way to answer "why didn't that work".
+     */
+    private fun showDiagnostics() {
+        val text = LogStore.text(this)
+        if (text.isBlank()) {
+            toast("Nothing logged yet — dictate once")
+            return
+        }
+        android.app.AlertDialog
+            .Builder(this)
+            .setTitle("Diagnostic log")
+            .setMessage(text.takeLast(20_000))
+            .setPositiveButton("Copy") { _, _ ->
+                copyToClipboard(text.takeLast(20_000))
+                toast("Copied")
+            }.setNeutralButton("Clear") { _, _ ->
+                LogStore.clear(this)
+                toast("Log cleared")
+            }.setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun copyToClipboard(text: String) {
+        val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("Verbatide", text))
     }
 
     /**
@@ -1138,6 +1352,90 @@ class MainActivity : AppCompatActivity() {
             toast(summary)
             refresh()
         }
+    }
+
+    // --- Provider benchmark ---
+
+    private var benchmarkRunning = false
+
+    private fun startBenchmark() {
+        if (benchmarkRunning) {
+            toast("Benchmark already running")
+            return
+        }
+        val source = HistoryManager.load(this).firstOrNull { it.recording.isNotBlank() }
+        val wav = source?.let { RecordingStore.read(this, it.recording) }
+        if (source == null || wav == null || wav.isEmpty()) {
+            android.app.AlertDialog
+                .Builder(this)
+                .setTitle("No audio to test with")
+                .setMessage(
+                    "The benchmark replays one of your own dictations. Turn on \"Keep audio\" " +
+                        "under Transcription history and dictate once, then try again.",
+                )
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+        val sttCount = ProviderHealth.sttChain(prefs()).count { SecurePrefs.getSttApiKey(this, it).isNotBlank() }
+        val chatCount = ProviderHealth.chatChain(prefs()).count { SecurePrefs.getChatApiKey(this, it).isNotBlank() }
+        val secs = String.format(java.util.Locale.US, "%.1f", (wav.size - 44).coerceAtLeast(0) / 32000.0)
+        android.app.AlertDialog
+            .Builder(this)
+            .setTitle("Benchmark ${sttCount + chatCount} providers?")
+            .setMessage(
+                "$sttCount transcription and $chatCount cleanup provider(s) will each get one " +
+                    "request with the same ${secs}s of audio. Every provider is billed once.",
+            )
+            .setPositiveButton("Run") { _, _ -> runBenchmark(wav, source.rawText.ifBlank { source.text }) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun runBenchmark(
+        wav: ByteArray,
+        rawText: String,
+    ) {
+        benchmarkRunning = true
+        val progress =
+            android.app.ProgressDialog(this).apply {
+                isIndeterminate = true
+                setTitle("Benchmarking")
+                setMessage("Starting…")
+                setCancelable(false)
+                show()
+            }
+        Thread {
+            val report =
+                try {
+                    BenchmarkRunner.run(
+                        this,
+                        wav,
+                        rawText,
+                        onProgress = { msg -> runOnUiThread { progress.setMessage(msg) } },
+                        isCancelled = { false },
+                    )
+                } catch (e: Exception) {
+                    LogStore.add("bench", "Benchmark failed: ${SecurePrefs.redact(e.message ?: e.javaClass.simpleName)}")
+                    null
+                }
+            runOnUiThread {
+                benchmarkRunning = false
+                progress.dismiss()
+                if (report == null) {
+                    toast("Benchmark failed — see the diagnostic log")
+                    return@runOnUiThread
+                }
+                LogStore.add("bench", "Benchmark finished: ${report.samples.count { it.ok }}/${report.samples.size} ok")
+                android.app.AlertDialog
+                    .Builder(this)
+                    .setTitle("Benchmark")
+                    .setMessage(report.asText())
+                    .setPositiveButton("Copy") { _, _ -> copyToClipboard(report.asText()) }
+                    .setNegativeButton("Close", null)
+                    .show()
+            }
+        }.start()
     }
 
     // --- Transcription language ---
@@ -1225,15 +1523,39 @@ class MainActivity : AppCompatActivity() {
 
     // --- Backup & restore ---
 
+    private var exportWithKeys = false
+
     private fun writeBackup(uri: Uri) {
         try {
+            val secrets = if (exportWithKeys) currentSecretMap() else emptyMap()
             contentResolver.openOutputStream(uri)?.bufferedWriter()?.use {
-                it.write(SettingsBackup.export(prefs()))
+                it.write(SettingsBackup.export(prefs(), secrets))
             } ?: throw java.io.IOException("Could not open file")
-            Toast.makeText(this, "Settings exported (API key not included)", Toast.LENGTH_LONG).show()
+            val msg =
+                if (exportWithKeys) {
+                    "Settings and ${secrets.size} API key(s) exported — the file is plaintext, keep it private"
+                } else {
+                    "Settings exported (API keys not included)"
+                }
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             Toast.makeText(this, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun currentSecretMap(): Map<String, String> {
+        val out = LinkedHashMap<String, String>()
+        for (k in listOf(SecurePrefs.KEY_API_KEY, SecurePrefs.KEY_STT_API_KEY, SecurePrefs.KEY_CHAT_API_KEY)) {
+            val v = SecurePrefs.getKey(this, k)
+            if (v.isNotBlank()) out[k] = v
+        }
+        for (p in Provider.entries) {
+            val stt = SecurePrefs.getSttApiKey(this, p)
+            if (stt.isNotBlank()) out[SecurePrefs.sttKeyFor(p)] = stt
+            val chat = SecurePrefs.getChatApiKey(this, p)
+            if (chat.isNotBlank()) out[SecurePrefs.chatKeyFor(p)] = chat
+        }
+        return out
     }
 
     private fun readBackup(uri: Uri) {
@@ -1241,7 +1563,10 @@ class MainActivity : AppCompatActivity() {
             val text =
                 contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
                     ?: throw java.io.IOException("Could not read file")
-            val result = SettingsBackup.import(prefs(), text)
+            val result =
+                SettingsBackup.import(prefs(), text) { key, value ->
+                    SecurePrefs.putKey(this, key, value)
+                }
             if (result.isSuccess) {
                 Toast.makeText(this, "Imported ${result.getOrNull() ?: 0} settings", Toast.LENGTH_SHORT).show()
                 refresh()
@@ -1511,11 +1836,70 @@ class MainActivity : AppCompatActivity() {
                     .show()
             }
 
+        val keepAudioRow =
+            run {
+                val sw =
+                    MaterialSwitch(this).apply {
+                        isClickable = false
+                        isChecked = RecordingStore.enabled(prefs())
+                    }
+                val row =
+                    settingsRow("Keep audio", keepAudioSummary(), sw) {
+                        val nv = !RecordingStore.enabled(prefs())
+                        prefs().edit().putBoolean(RecordingStore.KEY_KEEP_AUDIO, nv).apply()
+                        sw.isChecked = nv
+                        if (!nv) RecordingStore.clear(this)
+                        refresh()
+                    }
+                keepAudioSub = row.findViewWithTag("subtitle")
+                row.tag = "keep_audio_row"
+                row
+            }
+
+        val audioCapRow =
+            settingsRow("Kept audio", audioCapSummary()) {
+                val cur = RecordingStore.maxFiles(prefs())
+                val input =
+                    EditText(this).apply {
+                        hint = "Files to keep (${RecordingStore.DEF_KEEP_MAX})"
+                        setText(cur.toString())
+                        inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                        setPadding(dp(24), dp(8), dp(24), dp(8))
+                    }
+                android.app.AlertDialog
+                    .Builder(this)
+                    .setTitle("Audio retention")
+                    .setMessage("Oldest recordings are deleted first. Re-transcribing needs the audio.")
+                    .setView(input)
+                    .setPositiveButton("Save") { _, _ ->
+                        val n =
+                            input.text
+                                .toString()
+                                .trim()
+                                .toIntOrNull()
+                                ?.coerceIn(1, RecordingStore.MAX_KEEP) ?: cur
+                        prefs().edit().putInt(RecordingStore.KEY_KEEP_MAX, n).apply()
+                        RecordingStore.prune(
+                            this,
+                            HistoryManager.load(this).map { it.recording },
+                            n,
+                        )
+                        refresh()
+                    }.setNeutralButton("Delete audio") { _, _ ->
+                        RecordingStore.clear(this)
+                        refresh()
+                        toast("Kept audio deleted")
+                    }.setNegativeButton("Cancel", null)
+                    .show()
+            }.also { audioCapSub = it.findViewWithTag("subtitle") }
+
         container.addView(enabledRow)
         container.addView(browseRow)
         container.addView(dictRow)
         container.addView(tonesRow)
         container.addView(historyLimitRow)
+        container.addView(keepAudioRow)
+        container.addView(audioCapRow)
         container.addView(clearRow)
 
         val aboutRow =
@@ -1529,6 +1913,24 @@ class MainActivity : AppCompatActivity() {
             }
         container.addView(aboutRow)
         return container
+    }
+
+    private fun keepAudioSummary(): String {
+        if (!RecordingStore.enabled(prefs())) return "Off — transcripts only"
+        if (!HistoryManager.enabled(prefs())) return "Paused — history is off"
+        val n = RecordingStore.count(this)
+        val mb = RecordingStore.bytesUsed(this) / (1024.0 * 1024.0)
+        return String.format(java.util.Locale.US, "%d files · %.1f MB", n, mb)
+    }
+
+    private fun audioCapSummary(): String {
+        val mb = RecordingStore.bytesUsed(this) / (1024.0 * 1024.0)
+        return String.format(
+            java.util.Locale.US,
+            "%d max · %.1f MB used — tap to change",
+            RecordingStore.maxFiles(prefs()),
+            mb,
+        )
     }
 
     private fun prefs() = getSharedPreferences("phonewhisper", MODE_PRIVATE)

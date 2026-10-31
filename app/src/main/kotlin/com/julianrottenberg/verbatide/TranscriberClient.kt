@@ -10,8 +10,10 @@ object TranscriberClient {
     data class Result(val text: String?, val error: String?, val language: String? = null)
 
     private val client = OkHttpClient.Builder()
+        // Inactivity timeouts. The total budget is per call (see [budgetMs]) so a
+        // 30 s dictation keeps a short leash while a 5 min one is not cut off.
         .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(180, java.util.concurrent.TimeUnit.SECONDS)
         .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
@@ -37,6 +39,17 @@ object TranscriberClient {
 
     const val MAX_WAV_BYTES = 25 * 1024 * 1024 // OpenAI's typical 25 MB audio cap
     const val MAX_RESPONSE_CHARS = 20_000
+
+    /**
+     * Whole-call budget scaled to the audio: 16 kHz mono 16-bit WAV is 32 kB/s,
+     * so a 10 s clip gets ~40 s and a 5 min one ~180 s. The floor keeps a short
+     * clip from dying while a slow provider warms up; the ceiling stays under the
+     * documented per-request ASR limits.
+     */
+    fun budgetMs(wavData: ByteArray): Long {
+        val seconds = ((wavData.size - 44).coerceAtLeast(0) / 32_000).toLong()
+        return (30_000L + seconds * 1_000L).coerceIn(45_000L, 180_000L)
+    }
 
     /**
      * [vocabulary] is the dictionary's output spellings. It is sent only where the
@@ -113,16 +126,20 @@ object TranscriberClient {
                 }.post(body)
                 .build()
 
-        // Together: when `language` is known, always pass it (prevents STT
-        // translating to English). verbose_json is not supported there so
-        // only add it for providers that do (openai/groq/openrouter).
         // OkHttp validates the URL scheme; caller should pre-validate custom URLs.
+        val budget = budgetMs(wavData)
         val call = client.newCall(request)
-        currentCall = call
+        // Whole-call ceiling: a long dictation gets more room, a short one does
+        // not sit for two minutes when the provider is simply stuck.
+        call.timeout().timeout(budget, java.util.concurrent.TimeUnit.MILLISECONDS)
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 currentCall = null
-                callback(Result(null, e.message))
+                // A per-call timeout surfaces as InterruptedIOException, not
+                // SocketTimeoutException — both have to read as "timeout" in the
+                // history, otherwise the cause looks like a network failure.
+                val timedOut = e is java.io.InterruptedIOException || e is java.net.SocketTimeoutException
+                callback(Result(null, if (timedOut) "timeout after ${budget / 1000}s" else e.message))
             }
             override fun onResponse(call: Call, response: Response) {
                 currentCall = null

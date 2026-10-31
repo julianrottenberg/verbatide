@@ -155,6 +155,29 @@ class PostProcessorTest {
         assertEquals(false, tg.getJSONObject("reasoning").getBoolean("enabled"))
     }
 
+    @Test fun `auto uses the lowest effort each provider documents`() {
+        // MiniMax cannot disable thinking at all — `none` is a 400 — so auto
+        // has to collapse onto `low` there instead of sending nothing.
+        assertEquals(
+            "low",
+            bodyWithReasoning("https://api.minimax.io/v1/chat/completions", PostProcessor.Reasoning.AUTO)
+                .getString("reasoning_effort"),
+        )
+        val or = bodyWithReasoning("https://openrouter.ai/api/v1/chat/completions", PostProcessor.Reasoning.AUTO)
+        assertEquals(false, or.getJSONObject("reasoning").getBoolean("enabled"))
+        val tg = bodyWithReasoning("https://api.together.ai/v1/chat/completions", PostProcessor.Reasoning.AUTO)
+        assertEquals(false, tg.getJSONObject("reasoning").getBoolean("enabled"))
+        val oa = bodyWithReasoning("https://api.openai.com/v1/chat/completions", PostProcessor.Reasoning.AUTO)
+        assertEquals("minimal", oa.getString("reasoning_effort"))
+        // Groq has no `minimal`, and strict providers must stay untouched.
+        val gq = bodyWithReasoning("https://api.groq.com/openai/v1/chat/completions", PostProcessor.Reasoning.AUTO)
+        assertEquals("low", gq.getString("reasoning_effort"))
+        assertEquals(
+            0,
+            bodyWithReasoning("https://api.venice.ai/api/v1/chat/completions", PostProcessor.Reasoning.AUTO).length(),
+        )
+    }
+
     @Test fun `reasoning effort wire format per provider`() {
         val or = bodyWithReasoning("https://openrouter.ai/api/v1/chat/completions", PostProcessor.Reasoning.LOW)
         assertEquals("low", or.getJSONObject("reasoning").getString("effort"))

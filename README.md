@@ -17,8 +17,12 @@ Verbatide lets you speak into most apps without switching keyboards. Tap the flo
 - **MiniMax** — `asr-1.0` speech-to-text (`api.minimax.io/v1/speech_to_text`) + `MiniMax-M3.1-Flash` cleanup (`/v1/chat/completions`, OpenAI-compatible). Auth is the JWT from your MiniMax platform account. Two quirks are handled for you: ASR takes the language as an HTTP header, and M3.1 always thinks — cleanup pins `reasoning_effort=low`, the fastest setting.
 - **Custom** — point STT and chat at any OpenAI-compatible base URL (self-hosted, proxy, other provider) with per-endpoint model names
 - **Provider picker in Settings** — radio group + detail rows; API key hint/label adapts to the selected provider
-- **Backup provider** — pick a fallback that is used automatically when your primary is out of quota or its key is rejected. One choice covers both halves (STT *and* cleanup), which is what you want when a single account balance runs dry. The app remembers the failure for 24 h so the next dictation skips the dead provider instead of paying its round-trip, and it never probes usage on the dictation path.
-- **Daily usage check** — re-probes the primary at most once per 24 h (a single tiny chat request) from the background service, so it happens whether or not you ever open the app screen, and un-blocks a provider as soon as a top-up went through. A **Usage check** row shows the last result and runs the same probe on demand.
+- **Provider chains** — transcription and cleanup each get their own ordered list (e.g. `Mistral → MiniMax → Groq`), so one dry account rolls over to the next instead of handing you an error. Chains are independent: you can fail over for STT while cleanup stays on your favourite model.
+- **Daily usage check** — re-probes every entry in your chains at most once per 24 h (one tiny chat request each) from the background service, so it happens whether or not you ever open the app screen, and un-blocks a provider as soon as a top-up went through. The **Usage check** row shows the last result and has a **Check now** button.
+- **Activity log** — a row in Settings lists the last 60 dictations with provider, fallback depth, timings and the text that was actually inserted. **Diagnostic log** is the companion for "why did that fail": one line per provider attempt with the HTTP status and the raw error, plus what the usage check saw.
+- **Keep audio & re-transcribe** — opt in and each dictation's WAV is kept (cap configurable) so **Re-transcribe** in History can re-run the exact audio through your current chain, e.g. after switching to a better model. Off by default; the files are deleted when the entry leaves the history.
+- **Benchmark** — Settings can time every provider in your chains with a fixed sample (one short STT request + one short cleanup request) and prints a ranked table with success, latency and error. Useful before deciding which entry deserves to be primary.
+- **Portable settings** — Export writes one JSON with every endpoint, prompt, tone and preference (and, if you ask for it, your API keys — flagged as a plaintext file); Import restores it.
 
 The underlying HTTP contract is identical across all providers (`/v1/audio/transcriptions` multipart + `/v1/chat/completions` JSON with `Bearer` auth), so switching is just a base-URL + model-name swap.
 
@@ -47,21 +51,23 @@ See upstream's [Why I built this](#why-i-built-this) below. The short version: t
    - Chat endpoint
    - Chat model name
    Leave any field blank to fall back to the OpenAI default for that slot.
-3. Set your **API key** — the row label + hint (`sk-…` / `gsk_…` / `sk-or-…` / MiniMax's `JWT from platform.minimax.io`) adapts to the selected provider. Keys are stored per provider, so STT, cleanup and the backup can each live on a different account. A key saved before this existed keeps working as the selected provider's key.
+3. Set your **API key** — the row label + hint (`sk-…` / `gsk_…` / `sk-or-…` / MiniMax's `JWT from platform.minimax.io`) adapts to the selected provider. Keys are stored per provider, so each chain entry can live on a different account. A key saved before per-provider keys existed keeps working as the primary provider's key.
 4. Toggle **Use cloud transcription** on and pick your cleanup prompt under **Post-Processing** as usual.
 
 Groq model defaults: STT `whisper-large-v3-turbo`, chat `llama-3.3-70b-versatile`.
 OpenRouter defaults: STT `openai/whisper-large-v3`, chat `openai/gpt-4o-mini` (override with any OpenRouter slug).
 
-### Backup provider
+### Provider chains (fallback)
 
 Running out of credits mid-day should not hand you an error instead of your transcript.
 
-1. Under **Fallback**, pick a **Backup provider** — only providers that speak both STT and chat are offered (`fal.ai` is STT-only, `Custom` is a single endpoint).
-2. Tap **Backup key** and paste that account's key; one value serves both of its endpoints.
-3. Done. Every dictation tries the primary first and, on `402` (out of quota) or `401`/`403` (key rejected), retries once on the backup with a short "Mistral out — using MiniMax" toast. Rate limits (`429`) and server errors do **not** switch providers — those are transient.
+1. Under **Transcription** and **Cleanup**, tap the chain row to see the ordered list. The first entry is the one used for every request.
+2. **Add provider** appends to the end of that chain; the per-entry menu has **Make primary**, **Move up**, **Move down** and **Remove**. A chain always keeps at least one entry, and only providers that speak that half of the pipeline are offered (`fal.ai` does STT only).
+3. Give each entry a key (each provider row has its own key dialog) — one key per account serves both of that provider's endpoints.
 
-The failed provider stays out of the chain for 24 h, so later dictations go straight to the backup instead of paying for a request that is certain to fail. A probe runs at most once per day from the always-on service (on service start, and when a dictation begins) — it never blocks or delays a transcription — and clears the block as soon as a top-up landed. **Usage check** shows when it last ran and reruns it on tap.
+Every dictation walks the chain in order and retries on the next entry only for failures a different account can actually fix: `402` (out of quota), `401`/`403` (key rejected), or an empty transcript. Rate limits (`429`) and server errors do **not** switch — those are transient. You get a short "Mistral unavailable — trying MiniMax" toast when it happens, and nothing extra in your way when it doesn't.
+
+A provider that hit a wall is skipped for 24 h, so later dictations go straight to the next entry instead of paying for a request that is certain to fail. The daily usage check probes every chain entry from the always-on service (on service start and when a dictation begins — never on the transcription path itself) and un-blocks it as soon as a top-up landed. **Usage check** shows when it last ran, and **Check now** runs it immediately.
 
 ---
 
@@ -130,6 +136,7 @@ This fork does not run a backend. In cloud mode, requests go straight from your 
 - **Cloud mode**: audio is sent directly from your device to the configured provider's transcription API
 - **Optional cleanup**: transcript text is sent directly from your device to the configured provider's chat API
 - Your API key and custom endpoints are stored locally on-device in app storage
+- **Optional audio retention** (off by default): when enabled, each dictation's WAV stays in app storage so it can be re-transcribed. Files are capped, pruned with the history, and deleted when the entry is removed — but they are not encrypted.
 
 Full upstream policy: [PRIVACY.md](PRIVACY.md)
 

@@ -22,6 +22,7 @@ object ProviderHealth {
     const val BLOCK_TTL_MS = 24L * 60 * 60 * 1000
 
     private const val PREFIX = "provider_block_"
+    private const val OK_PREFIX = "provider_ok_"
 
     enum class Failure { QUOTA, AUTH, OTHER }
 
@@ -61,9 +62,12 @@ object ProviderHealth {
         reason: String,
         now: Long = System.currentTimeMillis(),
     ) {
+        // Persisted for 24 h and shown in Settings — never store a raw body that
+        // might echo a credential.
+        val safe = SecurePrefs.redact(reason).take(200)
         prefs
             .edit()
-            .putString(key(provider), "$now|$reason")
+            .putString(key(provider), "$now|$safe")
             .apply()
     }
 
@@ -85,59 +89,89 @@ object ProviderHealth {
     fun classify(error: String?): Failure {
         val e = error?.lowercase().orEmpty().trim()
         if (e.isEmpty()) return Failure.OTHER
+        // Match real status codes, not digits inside ids ("14032", "4031 ms").
+        val http402 = Regex("""\b402\b""").containsMatchIn(e)
+        val http401or403 = Regex("""\b40[13]\b""").containsMatchIn(e)
         return when {
-            e.contains("402") ||
+            http402 ||
                 e.contains("insufficient") ||
                 e.contains("quota") ||
                 e.contains("balance") ||
                 e.contains("credit") ||
                 e.contains("billing") ||
-                e.contains("payment required") -> Failure.QUOTA
+                e.contains("payment required") ||
+                e.contains("1008") -> Failure.QUOTA
 
-            e.contains("401") ||
-                e.contains("403") ||
+            http401or403 ||
                 e.contains("unauthor") ||
                 e.contains("forbidden") ||
                 e.contains("invalid api key") ||
                 e.contains("api key") ||
                 e.contains("secret key") ||
                 e.contains("login fail") ||
-                e.contains("authentication") -> Failure.AUTH
+                e.contains("authentication") ||
+                e.contains("1004") -> Failure.AUTH
 
             else -> Failure.OTHER
         }
     }
 
-    /**
-     * Providers to try, in order: the primary, then the configured backup,
-     * minus anything currently blocked. If *everything* is blocked the full
-     * list is returned anyway — better one doomed request than a silent
-     * failure on a guess that predates a top-up.
-     */
-    fun chain(
+    /** Records that [provider] served a real request at [now] — drives the status row. */
+    fun markOk(
         prefs: SharedPreferences,
-        primary: Provider,
+        provider: Provider,
+        now: Long = System.currentTimeMillis(),
+    ) {
+        prefs.edit().putLong(okKey(provider), now).apply()
+    }
+
+    fun lastOk(
+        prefs: SharedPreferences,
+        provider: Provider,
+    ): Long = prefs.getLong(okKey(provider), 0L)
+
+    /**
+     * Providers to try for [purpose], in chain order, minus anything currently
+     * paused. Paused entries move to the back rather than disappearing: if
+     * *everything* is paused the full chain comes back, because one doomed
+     * request beats a silent failure on a guess that predates a top-up.
+     */
+    fun order(
+        prefs: SharedPreferences,
+        purpose: ProviderConfig.Purpose,
         now: Long = System.currentTimeMillis(),
     ): List<Provider> {
-        val backup = ProviderConfig.backupProvider(prefs)?.takeIf { it != primary }
-        val all = if (backup == null) listOf(primary) else listOf(primary, backup)
-        val healthy = all.filter { blocked(prefs, it, now) == null }
-        return healthy.ifEmpty { all }
+        val full = ProviderConfig.chain(prefs, purpose)
+        val healthy = full.filter { blocked(prefs, it, now) == null }
+        return healthy.ifEmpty { full }
     }
 
-    fun sttChain(prefs: SharedPreferences): List<Provider> = chain(prefs, ProviderConfig.selectedStt(prefs))
+    fun sttChain(prefs: SharedPreferences): List<Provider> = order(prefs, ProviderConfig.Purpose.STT)
 
-    fun chatChain(prefs: SharedPreferences): List<Provider> = chain(prefs, ProviderConfig.selectedChat(prefs))
+    fun chatChain(prefs: SharedPreferences): List<Provider> = order(prefs, ProviderConfig.Purpose.CHAT)
 
-    /** Short "· MiniMax (no quota)" suffix for the settings row, or "" when healthy. */
-    fun blockedSummary(
+    /** Panel copy for a provider row: "OK · checked 2 h ago" / "Out of credit · 3 h ago". */
+    fun statusLine(
         prefs: SharedPreferences,
-        providers: List<Provider>,
+        provider: Provider,
+        now: Long = System.currentTimeMillis(),
     ): String {
-        val blockedOnes = providers.mapNotNull { p -> blocked(prefs, p)?.let { p to it } }
-        if (blockedOnes.isEmpty()) return ""
-        return blockedOnes.joinToString(" · ", prefix = " · ") { (p, _) -> "${p.displayName} paused" }
+        val paused = blocked(prefs, provider, now)
+        if (paused != null) {
+            val why =
+                if (paused.reason.length <= 40) {
+                    paused.reason.replaceFirstChar { c -> c.uppercase() }.ifBlank { "Paused" }
+                } else {
+                    Failures.describe(paused.reason)
+                }
+            return "$why · ${QuotaChecker.timeAgo(now - paused.at)}"
+        }
+        val ok = lastOk(prefs, provider)
+        if (ok > 0L) return "OK · checked ${QuotaChecker.timeAgo(now - ok)}"
+        return if (prefs.contains(key(provider))) "OK" else "not checked yet"
     }
+
+    private fun okKey(provider: Provider) = OK_PREFIX + provider.name.lowercase()
 
     private fun key(provider: Provider) = PREFIX + provider.name.lowercase()
 }

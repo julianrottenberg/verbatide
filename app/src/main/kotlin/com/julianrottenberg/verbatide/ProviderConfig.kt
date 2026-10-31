@@ -42,7 +42,8 @@ object ProviderConfig {
     private const val KEY_CHAT_MODEL_OVERRIDE = "chat_model_override"
     private const val KEY_CUSTOM_CHAT_URL = "custom_chat_base_url"
     private const val KEY_CUSTOM_CHAT_MODEL = "custom_chat_model"
-
+    private const val KEY_STT_CHAIN = "stt_chain"
+    private const val KEY_CHAT_CHAIN = "chat_chain"
     val sttProviders: List<Provider> get() = Provider.entries.filter { it.supportsStt }
     val chatProviders: List<Provider> get() = Provider.entries.filter { it.supportsChat }
 
@@ -164,19 +165,167 @@ object ProviderConfig {
     fun selected(prefs: SharedPreferences): Provider =
         fromString(prefs.getString(KEY_PROVIDER, null))
 
-    fun selectedStt(prefs: SharedPreferences): Provider {
-        val raw = prefs.getString(KEY_STT_PROVIDER, null)
-            ?: prefs.getString(KEY_PROVIDER, null)
-        return fromString(raw)
+    /**
+     * Which half of the pipeline a provider list belongs to. Each half has its
+     * own ordered chain, so transcription and cleanup can use different
+     * providers and fail over independently.
+     */
+    enum class Purpose(
+        val label: String,
+    ) {
+        STT("Transcription"),
+        CHAT("Cleanup"),
+        ;
+
+        /** Providers that can serve this half of the pipeline. */
+        /**
+         * Providers that can serve this half of the pipeline. Custom is included
+         * so the picker can offer it, but it is only usable once a URL is set —
+         * callers must also check [ProviderConfig.isReady].
+         */
+        fun eligible(): List<Provider> = Provider.entries.filter { if (this == STT) it.supportsStt else it.supportsChat }
     }
 
-    fun selectedChat(prefs: SharedPreferences): Provider {
-        val raw = prefs.getString(KEY_CHAT_PROVIDER, null)
-            ?: prefs.getString(KEY_PROVIDER, null)
+    private fun chainKey(purpose: Purpose) = if (purpose == Purpose.STT) KEY_STT_CHAIN else KEY_CHAT_CHAIN
+
+    /** The stored primary without consulting the chain — breaks the recursion in [chain]. */
+    private fun legacyPrimary(
+        prefs: SharedPreferences,
+        purpose: Purpose,
+    ): Provider {
+        val key = if (purpose == Purpose.STT) KEY_STT_PROVIDER else KEY_CHAT_PROVIDER
+        val raw = prefs.getString(key, null) ?: prefs.getString(KEY_PROVIDER, null)
         val p = fromString(raw)
-        // fal.ai is STT-only; fall back to the legacy/openai default for chat.
-        return if (!p.supportsChat) Provider.OPENAI else p
+        return if (purpose == Purpose.CHAT && !p.supportsChat) Provider.OPENAI else p
     }
+
+    /**
+     * Ordered providers for [purpose], priority first. Never empty.
+     *
+     * The chain is the single source of truth for "who is primary" — the old
+     * `stt_provider` / `chat_provider` keys survive only as a one-time source
+     * for installs that predate it (and so a downgrade still boots).
+     */
+    fun chain(
+        prefs: SharedPreferences,
+        purpose: Purpose,
+    ): List<Provider> {
+        val raw = prefs.getString(chainKey(purpose), null)?.trim().orEmpty()
+        if (raw.isNotBlank()) {
+            val parsed =
+                raw
+                    .split(',')
+                    .mapNotNull { name -> Provider.entries.firstOrNull { it.name.equals(name.trim(), ignoreCase = true) } }
+                    .filter { it in purpose.eligible() }
+                    .distinct()
+            // A chain that exists but parses to nothing (older build, renamed
+            // provider) must not silently resurrect the legacy keys — those may
+            // name providers the user has since removed.
+            return parsed.ifEmpty { listOf(purpose.eligible().first()) }
+        }
+        val primary = legacyPrimary(prefs, purpose)
+        val backup = backupProvider(prefs)?.takeIf { it in purpose.eligible() && it != primary }
+        return listOfNotNull(primary, backup)
+    }
+
+    fun primary(
+        prefs: SharedPreferences,
+        purpose: Purpose,
+    ): Provider = chain(prefs, purpose).first()
+
+    /**
+     * Writes the chain and mirrors its head into the legacy single-provider
+     * key. Also drops the pre-chain `backup_provider` value so a downgrade
+     * cannot resurrect a stale second entry.
+     */
+    fun saveChain(
+        prefs: SharedPreferences,
+        purpose: Purpose,
+        chain: List<Provider>,
+    ) {
+        val clean = chain.filter { it in purpose.eligible() }.distinct()
+        if (clean.isEmpty()) return
+        val editor =
+            prefs
+                .edit()
+                .putString(chainKey(purpose), clean.joinToString(",") { it.name.lowercase() })
+        // `backup_provider` is the pre-chain fallback for *both* halves. Drop it
+        // only once the other half also has a chain, or saving one chain would
+        // silently discard the other half's fallback.
+        val otherKey = chainKey(if (purpose == Purpose.STT) Purpose.CHAT else Purpose.STT)
+        if (!prefs.getString(otherKey, null).isNullOrBlank()) editor.remove(KEY_BACKUP_PROVIDER)
+        editor.apply()
+        if (purpose == Purpose.STT) saveSttProvider(prefs, clean.first()) else saveChatProvider(prefs, clean.first())
+    }
+    /**
+     * Makes [provider] the primary for [purpose], keeping the rest of the chain
+     * behind it. The radio lists in settings call this; without rewriting the
+     * chain, picking a different primary would be ignored on reload.
+     */
+    fun select(
+        prefs: SharedPreferences,
+        purpose: Purpose,
+        provider: Provider,
+    ) {
+        if (provider !in purpose.eligible()) return
+        val current = chain(prefs, purpose)
+        saveChain(prefs, purpose, listOf(provider) + current.filter { it != provider })
+    }
+    fun appendToChain(
+        prefs: SharedPreferences,
+        purpose: Purpose,
+        provider: Provider,
+    ) {
+        val current = chain(prefs, purpose)
+        if (provider in current || provider !in purpose.eligible()) return
+        saveChain(prefs, purpose, current + provider)
+    }
+
+    fun removeFromChain(
+        prefs: SharedPreferences,
+        purpose: Purpose,
+        provider: Provider,
+    ) {
+        val current = chain(prefs, purpose)
+        // Removing the last entry would leave the pipeline with nothing to try.
+        if (current.size <= 1 || provider !in current) return
+        saveChain(prefs, purpose, current - provider)
+    }
+
+    /** Moves an entry one slot up (-1) or down (+1); no-ops at the edges. */
+    fun moveInChain(
+        prefs: SharedPreferences,
+        purpose: Purpose,
+        provider: Provider,
+        delta: Int,
+    ) {
+        val current = chain(prefs, purpose).toMutableList()
+        val from = current.indexOf(provider)
+        if (from < 0) return
+        val to = (from + delta).coerceIn(0, current.size - 1)
+        if (to == from) return
+        current.removeAt(from)
+        current.add(to, provider)
+        saveChain(prefs, purpose, current)
+    }
+
+    /** "1. Mistral → 2. MiniMax" for the settings row. */
+    fun chainSummary(
+        prefs: SharedPreferences,
+        purpose: Purpose,
+    ): String =
+        chain(prefs, purpose)
+            .mapIndexed { i, p -> "${i + 1}. ${p.displayName}" }
+            .joinToString("  →  ")
+
+    private fun legacySelected(
+        prefs: SharedPreferences,
+        purpose: Purpose,
+    ): Provider = chain(prefs, purpose).first()
+
+    fun selectedStt(prefs: SharedPreferences): Provider = legacySelected(prefs, Purpose.STT)
+
+    fun selectedChat(prefs: SharedPreferences): Provider = legacySelected(prefs, Purpose.CHAT)
 
     fun defaultsFor(provider: Provider): Defaults = when (provider) {
         Provider.OPENAI -> OPENAI_DEFAULTS
@@ -201,8 +350,10 @@ object ProviderConfig {
     fun sttUrlFor(prefs: SharedPreferences, provider: Provider): String {
         if (provider == Provider.FAL) return FAL_DEFAULTS.sttUrl
         if (provider == Provider.CUSTOM) {
-            val custom = prefs.getString(KEY_CUSTOM_STT_URL, null)?.trim().orEmpty()
-            if (custom.isNotBlank()) return normalizeUrl(custom)
+            // Never fall back to OpenAI here: a Custom entry with no URL must be
+            // skipped, not quietly ship audio to api.openai.com with someone
+            // else's key.
+            return validateCustomUrlOrNull(prefs.getString(KEY_CUSTOM_STT_URL, "") ?: "").orEmpty()
         }
         return defaultsFor(provider).sttUrl
     }
@@ -211,11 +362,9 @@ object ProviderConfig {
 
     fun sttModelFor(prefs: SharedPreferences, provider: Provider): String {
         if (provider == Provider.FAL) return FAL_DEFAULTS.sttModel
-        // Per-STT override set via the "STT model" row — it belongs to the
-        // selected provider, so a backup must not inherit it.
-        if (provider == selectedStt(prefs)) {
-            prefs.getString(KEY_STT_MODEL_OVERRIDE, null)?.trim().orEmpty().let { if (it.isNotBlank()) return it }
-        }
+        // Per-provider override set via the "STT model" row. Keyed by provider
+        // so switching the primary can never hand Mistral's model name to Groq.
+        modelOverride(prefs, Purpose.STT, provider).let { if (it.isNotBlank()) return it }
         if (provider == Provider.CUSTOM) {
             val custom = prefs.getString(KEY_CUSTOM_STT_MODEL, null)?.trim().orEmpty()
             if (custom.isNotBlank()) return custom
@@ -227,8 +376,7 @@ object ProviderConfig {
 
     fun chatUrlFor(prefs: SharedPreferences, provider: Provider): String {
         if (provider == Provider.CUSTOM) {
-            val custom = prefs.getString(KEY_CUSTOM_CHAT_URL, null)?.trim().orEmpty()
-            if (custom.isNotBlank()) return normalizeUrl(custom)
+            return validateCustomUrlOrNull(prefs.getString(KEY_CUSTOM_CHAT_URL, "") ?: "").orEmpty()
         }
         return defaultsFor(provider).chatUrl
     }
@@ -236,11 +384,9 @@ object ProviderConfig {
     fun chatUrl(prefs: SharedPreferences): String = chatUrlFor(prefs, selectedChat(prefs))
 
     fun chatModelFor(prefs: SharedPreferences, provider: Provider): String {
-        // Per-chat override set via the "Chat model" row — bound to the
-        // selected provider, never inherited by a backup.
-        if (provider == selectedChat(prefs)) {
-            prefs.getString(KEY_CHAT_MODEL_OVERRIDE, null)?.trim().orEmpty().let { if (it.isNotBlank()) return it }
-        }
+        // Per-provider override, same rule as STT: bound to the provider it was
+        // typed for, never inherited by a fallback.
+        modelOverride(prefs, Purpose.CHAT, provider).let { if (it.isNotBlank()) return it }
         if (provider == Provider.CUSTOM) {
             val custom = prefs.getString(KEY_CUSTOM_CHAT_MODEL, null)?.trim().orEmpty()
             if (custom.isNotBlank()) return custom
@@ -314,15 +460,64 @@ object ProviderConfig {
     fun customChatUrl(prefs: SharedPreferences): String =
         prefs.getString(KEY_CUSTOM_CHAT_URL, "") ?: ""
 
-    fun saveSttModelOverride(prefs: SharedPreferences, value: String) {
-        if (value.isBlank()) prefs.edit().remove(KEY_STT_MODEL_OVERRIDE).apply()
-        else prefs.edit().putString(KEY_STT_MODEL_OVERRIDE, value.trim()).apply()
+    fun saveSttModelOverride(
+        prefs: SharedPreferences,
+        value: String,
+    ) = saveModelOverride(prefs, Purpose.STT, value)
+
+    fun saveChatModelOverride(
+        prefs: SharedPreferences,
+        value: String,
+    ) = saveModelOverride(prefs, Purpose.CHAT, value)
+
+    private fun overrideKey(
+        purpose: Purpose,
+        provider: Provider,
+    ) = (if (purpose == Purpose.STT) "stt_model_override_" else "chat_model_override_") + provider.name.lowercase()
+
+    /**
+     * Read-through for the pre-0.9.23 global override (single `*_model_override`
+     * key). It belonged to whichever provider was primary at the time, so it is
+     * adopted by the current head only, once, then retired.
+     */
+    private fun modelOverride(
+        prefs: SharedPreferences,
+        purpose: Purpose,
+        provider: Provider,
+    ): String {
+        val perProvider = prefs.getString(overrideKey(purpose, provider), null)?.trim().orEmpty()
+        if (perProvider.isNotBlank()) return perProvider
+        val legacyKey = if (purpose == Purpose.STT) KEY_STT_MODEL_OVERRIDE else KEY_CHAT_MODEL_OVERRIDE
+        val legacy = prefs.getString(legacyKey, null)?.trim().orEmpty()
+        if (legacy.isNotBlank() && provider == primary(prefs, purpose)) {
+            prefs.edit().putString(overrideKey(purpose, provider), legacy).remove(legacyKey).apply()
+            return legacy
+        }
+        return ""
     }
 
-    fun saveChatModelOverride(prefs: SharedPreferences, value: String) {
-        if (value.isBlank()) prefs.edit().remove(KEY_CHAT_MODEL_OVERRIDE).apply()
-        else prefs.edit().putString(KEY_CHAT_MODEL_OVERRIDE, value.trim()).apply()
+    private fun saveModelOverride(
+        prefs: SharedPreferences,
+        purpose: Purpose,
+        value: String,
+    ) {
+        val provider = primary(prefs, purpose)
+        val key = overrideKey(purpose, provider)
+        if (value.isBlank()) prefs.edit().remove(key).apply() else prefs.edit().putString(key, value.trim()).apply()
     }
+
+    /** True when the provider has everything it needs to be called. */
+    fun isReady(
+        prefs: SharedPreferences,
+        purpose: Purpose,
+        provider: Provider,
+    ): Boolean = provider in purpose.eligible() && (provider != Provider.CUSTOM || urlFor(prefs, purpose, provider).isNotBlank())
+
+    private fun urlFor(
+        prefs: SharedPreferences,
+        purpose: Purpose,
+        provider: Provider,
+    ) = if (purpose == Purpose.STT) sttUrlFor(prefs, provider) else chatUrlFor(prefs, provider)
 
     fun customChatModel(prefs: SharedPreferences): String =
         prefs.getString(KEY_CUSTOM_CHAT_MODEL, "") ?: ""

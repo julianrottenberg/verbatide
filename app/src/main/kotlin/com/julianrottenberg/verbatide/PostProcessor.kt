@@ -252,6 +252,7 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
         val subtitle: String,
     ) {
         DEFAULT("default", "Provider default", "Use whatever the model/provider defaults to"),
+        AUTO("auto", "Auto (fastest)", "Lowest effort the provider accepts — MiniMax always thinks"),
         OFF("off", "Off", "Disable reasoning"),
         LOW("low", "Low", "Minimal thinking — fastest/cheapest for cleanup"),
         MEDIUM("medium", "Medium", "Balanced thinking"),
@@ -261,6 +262,21 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
         companion object {
             fun fromKey(key: String?): Reasoning = entries.firstOrNull { it.key == key } ?: DEFAULT
         }
+    }
+
+    /**
+     * Whole-call budget for one cleanup pass: roughly 25 ms per input character
+     * (generation is slower than reading), doubled when the model is allowed to
+     * think, clamped to 45–150 s. Keeps a two-word dictation from waiting out a
+     * stuck socket while giving a long paragraph room to finish.
+     */
+    fun budgetMs(
+        chars: Int,
+        reasoning: Reasoning = Reasoning.DEFAULT,
+    ): Long {
+        val base = 45_000L + chars * 25L
+        val thinking = if (reasoning == Reasoning.DEFAULT || reasoning == Reasoning.OFF) 1L else 2L
+        return (base * thinking).coerceIn(45_000L, 150_000L)
     }
 
     fun process(
@@ -311,7 +327,12 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
                 .post(body)
                 .build()
 
+        // Cleanup latency grows with the transcript, and thinking models add more.
+        // A short dictation should not wait 90 s for a stuck request; a long one
+        // must not be cut off mid-generation.
+        val budget = budgetMs(text.length, reasoning)
         val call = client.newCall(request)
+        call.timeout().timeout(budget, java.util.concurrent.TimeUnit.MILLISECONDS)
         currentCall = call
         call.enqueue(
             object : Callback {
@@ -321,7 +342,8 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
                 ) {
                     currentCall = null
                     Log.e(TAG, "cleanup request to $chatUrl failed: ${e.message}")
-                    callback(Result(null, e.message))
+                    val timedOut = e is java.io.InterruptedIOException || e is java.net.SocketTimeoutException
+                    callback(Result(null, if (timedOut) "timeout after ${budget / 1000}s" else e.message))
                 }
 
                 override fun onResponse(
@@ -428,12 +450,32 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
         // and effort defaults to `max`, which is nonsense for a 200-word cleanup.
         // Collapse OFF onto low, the fastest documented setting.
         if (chatUrl.contains("minimax")) {
-            bodyJson.put("reasoning_effort", if (reasoning == Reasoning.OFF) "low" else reasoning.key)
+            bodyJson.put(
+                "reasoning_effort",
+                when (reasoning) {
+                    Reasoning.DEFAULT, Reasoning.AUTO, Reasoning.OFF -> "low"
+                    else -> reasoning.key
+                },
+            )
             return
         }
         val isOpenRouter = chatUrl.contains("openrouter.ai")
         val isTogether = chatUrl.contains("together.ai")
         val isOpenAiFamily = chatUrl.contains("api.openai.com") || chatUrl.contains("api.groq.com")
+        // AUTO picks the lowest level each endpoint documents. Sending "none"
+        // to a strict provider is a 400/422, so the "off" spike is only used
+        // where the docs describe a toggle.
+        if (reasoning == Reasoning.AUTO) {
+            when {
+                isOpenRouter || isTogether -> bodyJson.put("reasoning", JSONObject().apply { put("enabled", false) })
+                chatUrl.contains("api.openai.com") -> bodyJson.put("reasoning_effort", "minimal")
+                isOpenAiFamily -> bodyJson.put("reasoning_effort", "low")
+                // Mistral documents `none` as "minimal thinking".
+                chatUrl.contains("mistral") -> bodyJson.put("reasoning_effort", "none")
+                else -> Unit
+            }
+            return
+        }
         if (reasoning == Reasoning.OFF) {
             if (isOpenRouter || isTogether) {
                 bodyJson.put("reasoning", JSONObject().apply { put("enabled", false) })

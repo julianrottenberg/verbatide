@@ -68,9 +68,21 @@ object QuotaChecker {
         now: Long = System.currentTimeMillis(),
     ): String {
         val last = lastCheckAt(prefs)
-        if (last <= 0L) return "Never checked — runs in the background once a day"
-        val summary = lastSummary(prefs).ifBlank { "no result" }
-        return "Checked ${timeAgo(now - last)} — $summary"
+        if (last <= 0L) return "Never checked — runs daily in the background"
+        val paused = providersToCheck(prefs).filter { ProviderHealth.isBlocked(prefs, it, now) }
+        val next = nextIn(prefs, now).let { if (it <= 0L) "due now" else "next in ${timeAgo(it)}" }
+        val pausedText = if (paused.isEmpty()) "" else " · paused: ${paused.joinToString(", ") { p -> p.displayName }}"
+        return "Checked ${timeAgo(now - last)} · $next$pausedText"
+    }
+
+    /** Milliseconds until the next scheduled automatic check (0 when one is due). */
+    fun nextIn(
+        prefs: SharedPreferences,
+        now: Long = System.currentTimeMillis(),
+    ): Long {
+        val last = lastCheckAt(prefs)
+        if (last <= 0L) return 0L
+        return (last + DAY_MS - now).coerceAtLeast(0L)
     }
 
     /**
@@ -113,9 +125,9 @@ object QuotaChecker {
     }
 
     /**
-     * Probes every provider the user actually wired up (primary STT, primary
-     * cleanup, backup — deduplicated) and records the outcome. Returns the
-     * summary kept in prefs.
+     * Probes every provider the user actually wired up — both chains,
+     * deduplicated — and records the outcome per provider. Returns the summary
+     * kept in prefs.
      */
     internal fun runCheck(ctx: Context): String {
         val prefs = SecurePrefs.plainPrefs(ctx)
@@ -123,14 +135,18 @@ object QuotaChecker {
         val parts = mutableListOf<String>()
         for (provider in providers) {
             val apiKey = SecurePrefs.getChatApiKey(ctx, provider)
-            if (apiKey.isBlank()) {
-                parts += "${provider.displayName}: no key"
+            if (apiKey.isBlank() || !provider.supportsChat) {
+                parts += "${provider.displayName}: no cleanup key"
                 continue
             }
             val (url, model) = endpointFor(prefs, provider) ?: continue
             val probe = probe(url, model, apiKey)
             when (probe.verdict) {
-                Verdict.OK -> ProviderHealth.clear(prefs, provider)
+                Verdict.OK -> {
+                    ProviderHealth.clear(prefs, provider)
+                    ProviderHealth.markOk(prefs, provider)
+                }
+
                 Verdict.BLOCKED -> ProviderHealth.block(prefs, provider, probe.label)
                 // Inconclusive — leave whatever we already knew in place.
                 Verdict.UNKNOWN -> Unit
@@ -148,12 +164,8 @@ object QuotaChecker {
     }
 
     private fun providersToCheck(prefs: SharedPreferences): List<Provider> =
-        listOfNotNull(
-            ProviderConfig.selectedStt(prefs),
-            ProviderConfig.selectedChat(prefs),
-            ProviderConfig.backupProvider(prefs),
-        ).distinct().filter { it.supportsChat }
-
+        (ProviderConfig.chain(prefs, ProviderConfig.Purpose.STT) + ProviderConfig.chain(prefs, ProviderConfig.Purpose.CHAT))
+            .distinct()
     /** Chat endpoint + model for a provider, honouring the active overrides. */
     private fun endpointFor(
         prefs: SharedPreferences,
