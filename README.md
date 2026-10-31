@@ -14,8 +14,11 @@ Verbatide lets you speak into most apps without switching keyboards. Tap the flo
 - **OpenRouter** — proxy STT + chat through OpenRouter (`openrouter.ai/api/v1`) with configurable model slugs
 - **Together**, **Venice**, **NanoGPT**, **fal.ai** (Wizper STT) — one-click OpenAI-compatible entries
 - **Mistral** — `voxtral-mini-latest` STT + `mistral-small-latest` cleanup via `api.mistral.ai`. A **Mistral Vibe subscription works here**: Mistral plans are global, so the same included monthly usage and API key cover Vibe, Studio, and the plain API (`docs.mistral.ai/admin/billing-usage/subscriptions`). Create a key on La Plateforme, pick **Mistral** in Settings, done.
+- **MiniMax** — `asr-1.0` speech-to-text (`api.minimax.io/v1/speech_to_text`) + `MiniMax-M3.1-Flash` cleanup (`/v1/chat/completions`, OpenAI-compatible). Auth is the JWT from your MiniMax platform account. Two quirks are handled for you: ASR takes the language as an HTTP header, and M3.1 always thinks — cleanup pins `reasoning_effort=low`, the fastest setting.
 - **Custom** — point STT and chat at any OpenAI-compatible base URL (self-hosted, proxy, other provider) with per-endpoint model names
 - **Provider picker in Settings** — radio group + detail rows; API key hint/label adapts to the selected provider
+- **Backup provider** — pick a fallback that is used automatically when your primary is out of quota or its key is rejected. One choice covers both halves (STT *and* cleanup), which is what you want when a single account balance runs dry. The app remembers the failure for 24 h so the next dictation skips the dead provider instead of paying its round-trip, and it never probes usage on the dictation path.
+- **Daily usage check** — re-probes the primary at most once per 24 h (a single tiny chat request) from the background service, so it happens whether or not you ever open the app screen, and un-blocks a provider as soon as a top-up went through. A **Usage check** row shows the last result and runs the same probe on demand.
 
 The underlying HTTP contract is identical across all providers (`/v1/audio/transcriptions` multipart + `/v1/chat/completions` JSON with `Bearer` auth), so switching is just a base-URL + model-name swap.
 
@@ -37,18 +40,28 @@ See upstream's [Why I built this](#why-i-built-this) below. The short version: t
 
 ## Provider setup
 
-1. In **Settings**, pick the STT and cleanup providers (**OpenAI**, **Groq**, **OpenRouter**, **Together**, **Venice**, **Mistral**, **NanoGPT**, **fal.ai**, or **Custom**).
+1. In **Settings**, pick the STT and cleanup providers (**OpenAI**, **Groq**, **OpenRouter**, **Together**, **Venice**, **Mistral**, **MiniMax**, **NanoGPT**, **fal.ai**, or **Custom**).
 2. For **Custom**, tap through the four endpoint/model rows to set:
    - STT endpoint (default: OpenAI's)
    - STT model name
    - Chat endpoint
    - Chat model name
    Leave any field blank to fall back to the OpenAI default for that slot.
-3. Set your **API key** — the row label + hint (`sk-…` / `gsk_…` / `sk-or-…`) adapts to the provider. One key is used for both STT and cleanup (use a single provider for both, or Custom if you want to split them across URLs).
+3. Set your **API key** — the row label + hint (`sk-…` / `gsk_…` / `sk-or-…` / MiniMax's `JWT from platform.minimax.io`) adapts to the selected provider. Keys are stored per provider, so STT, cleanup and the backup can each live on a different account. A key saved before this existed keeps working as the selected provider's key.
 4. Toggle **Use cloud transcription** on and pick your cleanup prompt under **Post-Processing** as usual.
 
 Groq model defaults: STT `whisper-large-v3-turbo`, chat `llama-3.3-70b-versatile`.
 OpenRouter defaults: STT `openai/whisper-large-v3`, chat `openai/gpt-4o-mini` (override with any OpenRouter slug).
+
+### Backup provider
+
+Running out of credits mid-day should not hand you an error instead of your transcript.
+
+1. Under **Fallback**, pick a **Backup provider** — only providers that speak both STT and chat are offered (`fal.ai` is STT-only, `Custom` is a single endpoint).
+2. Tap **Backup key** and paste that account's key; one value serves both of its endpoints.
+3. Done. Every dictation tries the primary first and, on `402` (out of quota) or `401`/`403` (key rejected), retries once on the backup with a short "Mistral out — using MiniMax" toast. Rate limits (`429`) and server errors do **not** switch providers — those are transient.
+
+The failed provider stays out of the chain for 24 h, so later dictations go straight to the backup instead of paying for a request that is certain to fail. A probe runs at most once per day from the always-on service (on service start, and when a dictation begins) — it never blocks or delays a transcription — and clears the block as soon as a top-up landed. **Usage check** shows when it last ran and reruns it on tap.
 
 ---
 

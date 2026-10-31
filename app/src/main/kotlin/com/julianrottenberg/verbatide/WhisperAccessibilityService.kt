@@ -123,6 +123,9 @@ class WhisperAccessibilityService : AccessibilityService() {
         updateBubbleVisibility()
         // Try to load local model in background
         thread { initLocalModel() }
+        // The overlay service, not the settings screen, is what actually runs
+        // day to day — so the daily usage probe hangs off it.
+        QuotaChecker.maybeCheckDaily(this)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -662,6 +665,10 @@ class WhisperAccessibilityService : AccessibilityService() {
         setBusy(false)
         setAppearance(COLOR_RECORDING)
         startPulse()
+        // Cheap prefs guard on purpose: a long-lived service may never restart,
+        // so the day boundary gets noticed here. The probe itself runs on its
+        // own thread and is skipped while one is already in flight.
+        QuotaChecker.maybeCheckDaily(this)
 
         thread {
             val buf = ByteArray(bufSize)
@@ -775,63 +782,110 @@ class WhisperAccessibilityService : AccessibilityService() {
         }
 
         val p = prefs()
-        val selectedStt = ProviderConfig.selectedStt(p)
-        val sttLanguage = prefs().getString("stt_language", "auto")
+        val sttLanguage = p.getString("stt_language", "auto")
+
+        // Primary first, then the backup unless the backup is known to be dry.
+        val usable = ProviderHealth.sttChain(p).filter { SecurePrefs.getSttApiKey(this, it).isNotBlank() }
+        if (usable.isEmpty()) {
+            reset(
+                if (ProviderConfig.backupProvider(p) != null) {
+                    "Set an STT key for the main or backup provider"
+                } else {
+                    "Set STT API key in Verbatide"
+                },
+            )
+            return
+        }
+
+        attemptStt(wav, usable, 0, sttLanguage)
+    }
+
+    /**
+     * Tries [usable] in order, moving to the next provider when this one is out
+     * of quota or its key is rejected — that is the whole backup-provider rule.
+     */
+    private fun attemptStt(
+        wav: ByteArray,
+        usable: List<Provider>,
+        index: Int,
+        sttLanguage: String?,
+    ) {
+        val provider =
+            usable.getOrNull(index) ?: run {
+                finishTranscriptionError("No transcription provider available")
+                return
+            }
+        val apiKey = SecurePrefs.getSttApiKey(this, provider)
+        // One hard timeout per attempt, so a hung request can never leave the
+        // spinner running forever (reported with fal.ai) and the backup still
+        // gets a budget of its own.
+        handler.removeCallbacks(cancelTimeout)
+        handler.postDelayed(cancelTimeout, /* 75s */ 75_000L)
 
         val onResult: (String?, String?, String?) -> Unit = { text, language, error ->
             if (!text.isNullOrBlank()) {
-                // Prefer the user-pinned language; fall back to Whisper's
+                ProviderHealth.clear(prefs(), provider)
+                // Prefer the user-pinned language; fall back to the provider's
                 // detected language so cleanup knows what NOT to translate.
                 val pinned = prefs().getString("stt_language", "auto") ?: "auto"
                 val hint = if (pinned != "auto") langName(pinned) else language
-                handleTranscriptionResult(text, hint, selectedStt.name.lowercase())
+                handleTranscriptionResult(text, hint, provider.name.lowercase())
+            } else if (switchToBackup(provider, error, usable, index)) {
+                attemptStt(wav, usable, index + 1, sttLanguage)
             } else {
-                handler.post {
-                    toast("Error: ${error ?: "empty transcript"}")
-                    state = State.IDLE
-                    setBusy(false)
-                    setAppearance(COLOR_IDLE)
-                }
+                finishTranscriptionError("Error: ${error ?: "empty transcript"}")
             }
         }
 
-        // Arm a hard timeout so the spinner can never spin forever (the
-        // user reported an endless TRANSCRIBING state with fal.ai).
-        handler.postDelayed(cancelTimeout, /* 75s */ 75_000L)
-
-        when (selectedStt) {
-            Provider.FAL -> {
-                val apiKey = SecurePrefs.getSttApiKey(this)
-                if (apiKey.isBlank()) {
-                    handler.removeCallbacks(cancelTimeout)
-                    reset("Set STT API key (fal.ai) in Verbatide")
-                    return
-                }
+        when (provider) {
+            Provider.FAL ->
                 FalTranscriber.transcribe(wav, apiKey, sttLanguage) { r ->
                     handler.removeCallbacks(cancelTimeout)
                     onResult(r.text, r.language, r.error)
                 }
-            }
 
-            else -> {
-                val apiKey = SecurePrefs.getSttApiKey(this)
-                if (apiKey.isBlank()) {
-                    handler.removeCallbacks(cancelTimeout)
-                    reset("Set STT API key in Verbatide")
-                    return
-                }
+            else ->
                 TranscriberClient.transcribe(
                     wavData = wav,
                     apiKey = apiKey,
-                    sttUrl = ProviderConfig.sttUrl(p),
-                    sttModel = ProviderConfig.sttModel(p),
+                    sttUrl = ProviderConfig.sttUrlFor(prefs(), provider),
+                    sttModel = ProviderConfig.sttModelFor(prefs(), provider),
                     language = sttLanguage,
                     vocabulary = DictionaryManager.outputTerms(this),
                 ) { result ->
                     handler.removeCallbacks(cancelTimeout)
                     onResult(result.text, result.language, result.error)
                 }
-            }
+        }
+    }
+
+    /**
+     * Marks [provider] unusable and announces the switch when the failure is one
+     * a backup can actually fix (quota or key). Returns true when the caller
+     * should retry with the next provider instead of surfacing the error.
+     */
+    private fun switchToBackup(
+        provider: Provider,
+        error: String?,
+        candidates: List<Provider>,
+        index: Int,
+    ): Boolean {
+        val failure = ProviderHealth.classify(error)
+        if (failure == ProviderHealth.Failure.OTHER) return false
+        ProviderHealth.block(prefs(), provider, error ?: failure.name.lowercase())
+        val next = candidates.getOrNull(index + 1) ?: return false
+        Log.w(TAG, "${provider.displayName} unusable ($error) — switching to ${next.displayName}")
+        handler.post { toast("${provider.displayName} out — using ${next.displayName}") }
+        return true
+    }
+
+    private fun finishTranscriptionError(message: String) {
+        handler.removeCallbacks(cancelTimeout)
+        handler.post {
+            toast(message)
+            state = State.IDLE
+            setBusy(false)
+            setAppearance(COLOR_IDLE)
         }
     }
 
@@ -887,10 +941,11 @@ class WhisperAccessibilityService : AccessibilityService() {
         val text = VoiceCommands.inlineIfEnabled(commandsOn, dictText)
 
         val usePostProcessing = prefs().getBoolean("use_post_processing", false)
-        val apiKey = SecurePrefs.getChatApiKey(this)
 
         if (usePostProcessing) {
-            if (apiKey.isBlank()) {
+            // Same rule as STT: primary cleanup provider first, then the backup.
+            val usable = ProviderHealth.chatChain(prefs()).filter { SecurePrefs.getChatApiKey(this, it).isNotBlank() }
+            if (usable.isEmpty()) {
                 handler.post {
                     toast("Post-processing needs API key. Using raw text.")
                     injectText(text)
@@ -905,46 +960,8 @@ class WhisperAccessibilityService : AccessibilityService() {
                 return
             }
 
-            val p2 = prefs()
             val prompt = prefs().getString("post_processing_prompt", PostProcessor.DEFAULT_PROMPT) ?: PostProcessor.DEFAULT_PROMPT
-            PostProcessor.process(
-                text = text,
-                prompt = prompt,
-                apiKey = apiKey,
-                chatUrl = ProviderConfig.chatUrl(p2),
-                chatModel = ProviderConfig.chatModel(p2),
-                reasoning = PostProcessor.Reasoning.fromKey(prefs().getString("reasoning_effort", "off")),
-                languageHint = languageHint,
-                keepTerms = DictionaryManager.outputTerms(this),
-                toneInstruction = ToneManager.instructionFor(this@WhisperAccessibilityService, pendingTargetPackage),
-            ) { result ->
-                handler.post {
-                    if (result.text != null && result.text.isNotBlank()) {
-                        injectText(result.text)
-                        HistoryManager.append(
-                            this@WhisperAccessibilityService,
-                            HistoryEntry(System.currentTimeMillis(), result.text, provider, languageHint),
-                        )
-                    } else {
-                        // Surface the actual cause (HTTP code, provider message) so
-                        // "cleanup doesn't work" is debuggable from the toast alone.
-                        Log.w(TAG, "Cleanup failed, falling back to raw text: ${result.error}")
-                        val reason = result.error?.let { if (it.length > 90) it.take(90) + "…" else it }
-                        injectText(
-                            text,
-                            feedback = if (reason != null) "Cleanup failed: $reason" else "Cleanup failed — raw copied to clipboard",
-                            feedbackDurationMs = 4000,
-                        )
-                        HistoryManager.append(
-                            this@WhisperAccessibilityService,
-                            HistoryEntry(System.currentTimeMillis(), text, provider, languageHint),
-                        )
-                    }
-                    state = State.IDLE
-                    setBusy(false)
-                    setAppearance(COLOR_IDLE)
-                }
-            }
+            attemptCleanup(text, prompt, usable, 0, provider, languageHint)
         } else {
             handler.post {
                 injectText(text)
@@ -952,6 +969,70 @@ class WhisperAccessibilityService : AccessibilityService() {
                     this@WhisperAccessibilityService,
                     HistoryEntry(System.currentTimeMillis(), text, provider, languageHint),
                 )
+                state = State.IDLE
+                setBusy(false)
+                setAppearance(COLOR_IDLE)
+            }
+        }
+    }
+
+    /** Cleanup counterpart of [attemptStt]: same order, same fallback rule. */
+    private fun attemptCleanup(
+        text: String,
+        prompt: String,
+        usable: List<Provider>,
+        index: Int,
+        sttProvider: String,
+        languageHint: String?,
+    ) {
+        val provider =
+            usable.getOrNull(index) ?: run {
+                handler.post {
+                    injectText(text, feedback = "Cleanup failed — raw text used", feedbackDurationMs = 4000)
+                    state = State.IDLE
+                    setBusy(false)
+                    setAppearance(COLOR_IDLE)
+                }
+                return
+            }
+
+        PostProcessor.process(
+            text = text,
+            prompt = prompt,
+            apiKey = SecurePrefs.getChatApiKey(this, provider),
+            chatUrl = ProviderConfig.chatUrlFor(prefs(), provider),
+            chatModel = ProviderConfig.chatModelFor(prefs(), provider),
+            reasoning = PostProcessor.Reasoning.fromKey(prefs().getString("reasoning_effort", "off")),
+            languageHint = languageHint,
+            keepTerms = DictionaryManager.outputTerms(this),
+            toneInstruction = ToneManager.instructionFor(this@WhisperAccessibilityService, pendingTargetPackage),
+        ) { result ->
+            handler.post {
+                if (result.text != null && result.text.isNotBlank()) {
+                    ProviderHealth.clear(prefs(), provider)
+                    injectText(result.text)
+                    HistoryManager.append(
+                        this@WhisperAccessibilityService,
+                        HistoryEntry(System.currentTimeMillis(), result.text, sttProvider, languageHint),
+                    )
+                } else if (switchToBackup(provider, result.error, usable, index)) {
+                    attemptCleanup(text, prompt, usable, index + 1, sttProvider, languageHint)
+                    return@post
+                } else {
+                    // Surface the actual cause (HTTP code, provider message) so
+                    // "cleanup doesn't work" is debuggable from the toast alone.
+                    Log.w(TAG, "Cleanup failed, falling back to raw text: ${result.error}")
+                    val reason = result.error?.let { if (it.length > 90) it.take(90) + "…" else it }
+                    injectText(
+                        text,
+                        feedback = if (reason != null) "Cleanup failed: $reason" else "Cleanup failed — raw copied to clipboard",
+                        feedbackDurationMs = 4000,
+                    )
+                    HistoryManager.append(
+                        this@WhisperAccessibilityService,
+                        HistoryEntry(System.currentTimeMillis(), text, sttProvider, languageHint),
+                    )
+                }
                 state = State.IDLE
                 setBusy(false)
                 setAppearance(COLOR_IDLE)

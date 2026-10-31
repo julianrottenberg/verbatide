@@ -23,6 +23,7 @@ enum class Provider(
     VENICE("Venice AI"),
     MISTRAL("Mistral"),
     NANOGPT("NanoGPT"),
+    MINIMAX("MiniMax"),
     FAL("fal.ai", supportsStt = true, supportsChat = false),
     CUSTOM("Custom"),
 }
@@ -119,6 +120,22 @@ object ProviderConfig {
     )
 
     /**
+     * MiniMax: ASR (`asr-1.0`) on /v1/speech_to_text plus an OpenAI-compatible
+     * chat endpoint. Three quirks the transport layer has to know about:
+     *  - ASR takes `language` as a *header*, and has no prompt/context hint.
+     *  - M3.1 thinking cannot be turned off; effort defaults to `max`, so
+     *    cleanup has to ask for `reasoning_effort=low` explicitly.
+     *  - Errors are OpenAI-shaped with the HTTP status carrying the meaning
+     *    (402 = out of quota), which is exactly what the fallback logic needs.
+     */
+    private val MINIMAX_DEFAULTS = Defaults(
+        sttUrl = "https://api.minimax.io/v1/speech_to_text",
+        sttModel = "asr-1.0",
+        chatUrl = "https://api.minimax.io/v1/chat/completions",
+        chatModel = "MiniMax-M3.1-Flash",
+    )
+
+    /**
      * fal.ai Wizper (whisper v3 large) — STT only, queue-based API at
      * https://queue.fal.run/fal-ai/wizper (audio_url + polling). Handled by
      * FalTranscriber rather than the generic multipart path.
@@ -137,6 +154,7 @@ object ProviderConfig {
         "venice", "venice_ai", "veniceai" -> Provider.VENICE
         "mistral", "voxtral" -> Provider.MISTRAL
         "nanogpt", "nano_gpt", "nano-gpt" -> Provider.NANOGPT
+        "minimax", "mini_max", "minimaxi", "minimax.io" -> Provider.MINIMAX
         "fal", "fal.ai", "fal_ai", "falai", "wizper" -> Provider.FAL
         "custom" -> Provider.CUSTOM
         else -> Provider.OPENAI
@@ -168,6 +186,7 @@ object ProviderConfig {
         Provider.VENICE -> VENICE_DEFAULTS
         Provider.MISTRAL -> MISTRAL_DEFAULTS
         Provider.NANOGPT -> NANOGPT_DEFAULTS
+        Provider.MINIMAX -> MINIMAX_DEFAULTS
         Provider.FAL -> FAL_DEFAULTS
         Provider.CUSTOM -> OPENAI_DEFAULTS // fallback shape; custom values override
     }
@@ -175,47 +194,61 @@ object ProviderConfig {
     // -----------------------------------------------------------------------
     // Resolved values (defaults + custom overrides)
     // -----------------------------------------------------------------------
-    fun sttUrl(prefs: SharedPreferences): String {
-        val p = selectedStt(prefs)
-        if (p == Provider.FAL) return FAL_DEFAULTS.sttUrl
-        if (p == Provider.CUSTOM) {
+    /**
+     * STT endpoint for an explicit provider. The no-argument variants below are
+     * the primary-provider shortcuts; the backup chain uses these directly.
+     */
+    fun sttUrlFor(prefs: SharedPreferences, provider: Provider): String {
+        if (provider == Provider.FAL) return FAL_DEFAULTS.sttUrl
+        if (provider == Provider.CUSTOM) {
             val custom = prefs.getString(KEY_CUSTOM_STT_URL, null)?.trim().orEmpty()
             if (custom.isNotBlank()) return normalizeUrl(custom)
         }
-        return defaultsFor(p).sttUrl
+        return defaultsFor(provider).sttUrl
     }
 
-    fun sttModel(prefs: SharedPreferences): String {
-        val p = selectedStt(prefs)
-        if (p == Provider.FAL) return FAL_DEFAULTS.sttModel
-        // Per-STT override set via the "STT model" row — persists across providers
-        prefs.getString(KEY_STT_MODEL_OVERRIDE, null)?.trim().orEmpty().let { if (it.isNotBlank()) return it }
-        if (p == Provider.CUSTOM) {
+    fun sttUrl(prefs: SharedPreferences): String = sttUrlFor(prefs, selectedStt(prefs))
+
+    fun sttModelFor(prefs: SharedPreferences, provider: Provider): String {
+        if (provider == Provider.FAL) return FAL_DEFAULTS.sttModel
+        // Per-STT override set via the "STT model" row — it belongs to the
+        // selected provider, so a backup must not inherit it.
+        if (provider == selectedStt(prefs)) {
+            prefs.getString(KEY_STT_MODEL_OVERRIDE, null)?.trim().orEmpty().let { if (it.isNotBlank()) return it }
+        }
+        if (provider == Provider.CUSTOM) {
             val custom = prefs.getString(KEY_CUSTOM_STT_MODEL, null)?.trim().orEmpty()
             if (custom.isNotBlank()) return custom
         }
-        return defaultsFor(p).sttModel
+        return defaultsFor(provider).sttModel
     }
 
-    fun chatUrl(prefs: SharedPreferences): String {
-        val p = selectedChat(prefs)
-        if (p == Provider.CUSTOM) {
+    fun sttModel(prefs: SharedPreferences): String = sttModelFor(prefs, selectedStt(prefs))
+
+    fun chatUrlFor(prefs: SharedPreferences, provider: Provider): String {
+        if (provider == Provider.CUSTOM) {
             val custom = prefs.getString(KEY_CUSTOM_CHAT_URL, null)?.trim().orEmpty()
             if (custom.isNotBlank()) return normalizeUrl(custom)
         }
-        return defaultsFor(p).chatUrl
+        return defaultsFor(provider).chatUrl
     }
 
-    fun chatModel(prefs: SharedPreferences): String {
-        val p = selectedChat(prefs)
-        // Per-chat override set via the "Chat model" row — persists across providers
-        prefs.getString(KEY_CHAT_MODEL_OVERRIDE, null)?.trim().orEmpty().let { if (it.isNotBlank()) return it }
-        if (p == Provider.CUSTOM) {
+    fun chatUrl(prefs: SharedPreferences): String = chatUrlFor(prefs, selectedChat(prefs))
+
+    fun chatModelFor(prefs: SharedPreferences, provider: Provider): String {
+        // Per-chat override set via the "Chat model" row — bound to the
+        // selected provider, never inherited by a backup.
+        if (provider == selectedChat(prefs)) {
+            prefs.getString(KEY_CHAT_MODEL_OVERRIDE, null)?.trim().orEmpty().let { if (it.isNotBlank()) return it }
+        }
+        if (provider == Provider.CUSTOM) {
             val custom = prefs.getString(KEY_CUSTOM_CHAT_MODEL, null)?.trim().orEmpty()
             if (custom.isNotBlank()) return custom
         }
-        return defaultsFor(p).chatModel
+        return defaultsFor(provider).chatModel
     }
+
+    fun chatModel(prefs: SharedPreferences): String = chatModelFor(prefs, selectedChat(prefs))
 
     fun saveProvider(prefs: SharedPreferences, provider: Provider) {
         prefs.edit().putString(KEY_PROVIDER, provider.name.lowercase()).apply()
@@ -227,6 +260,49 @@ object ProviderConfig {
 
     fun saveChatProvider(prefs: SharedPreferences, provider: Provider) {
         prefs.edit().putString(KEY_CHAT_PROVIDER, provider.name.lowercase()).apply()
+    }
+
+    // -----------------------------------------------------------------------
+    // Backup (fallback) provider
+    // -----------------------------------------------------------------------
+    private const val KEY_BACKUP_PROVIDER = "backup_provider"
+
+    /**
+     * Providers eligible as a fallback. One backup covers both halves — STT
+     * *and* cleanup — so it has to support both. fal.ai is STT-only and Custom
+     * points at a single self-hosted endpoint, so neither qualifies.
+     */
+    val backupProviders: List<Provider>
+        get() = Provider.entries.filter { it.supportsStt && it.supportsChat && it != Provider.CUSTOM }
+
+    /** Null means "no fallback configured" — unlike [fromString], which defaults to OpenAI. */
+    fun backupProvider(prefs: SharedPreferences): Provider? {
+        val raw = prefs.getString(KEY_BACKUP_PROVIDER, null)?.trim().orEmpty()
+        if (raw.isBlank()) return null
+        return Provider.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) }
+    }
+
+    /** Passing null clears the fallback. */
+    fun saveBackupProvider(
+        prefs: SharedPreferences,
+        provider: Provider?,
+    ) {
+        val editor = prefs.edit()
+        if (provider == null) {
+            editor.remove(KEY_BACKUP_PROVIDER)
+        } else {
+            editor.putString(KEY_BACKUP_PROVIDER, provider.name.lowercase())
+        }
+        editor.apply()
+    }
+
+    fun backupSummary(prefs: SharedPreferences): String {
+        val p = backupProvider(prefs) ?: return "None — a failed request just shows an error"
+        if (p == selectedStt(prefs) || p == selectedChat(prefs)) {
+            return "${p.displayName} is already in use — pick a different provider"
+        }
+        val d = defaultsFor(p)
+        return "${p.displayName} · ${d.sttModel} · ${d.chatModel}"
     }
 
     fun customSttUrl(prefs: SharedPreferences): String =

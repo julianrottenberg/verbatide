@@ -121,10 +121,77 @@ object SecurePrefs {
         }
     }
 
-    fun getSttApiKey(ctx: Context): String = getKey(ctx, KEY_STT_API_KEY)
-    fun putSttApiKey(ctx: Context, value: String) = putKey(ctx, KEY_STT_API_KEY, value)
-    fun getChatApiKey(ctx: Context): String = getKey(ctx, KEY_CHAT_API_KEY)
-    fun putChatApiKey(ctx: Context, value: String) = putKey(ctx, KEY_CHAT_API_KEY, value)
-    fun hasSttApiKey(ctx: Context): Boolean = getSttApiKey(ctx).isNotBlank()
-    fun hasChatApiKey(ctx: Context): Boolean = getChatApiKey(ctx).isNotBlank()
+    /**
+     * Per-provider key slots. The purpose-wide key stays the fallback, so keys
+     * saved before this existed keep working; a fallback provider just gets its
+     * own slot instead of sharing (and overwriting) the primary's.
+     */
+    fun sttKeyFor(provider: Provider): String = "stt_api_key_" + provider.name.lowercase()
+
+    fun chatKeyFor(provider: Provider): String = "chat_api_key_" + provider.name.lowercase()
+
+    fun getSttApiKey(
+        ctx: Context,
+        provider: Provider? = null,
+    ): String = getScopedKey(ctx, KEY_STT_API_KEY, provider?.let(::sttKeyFor), provider) { ProviderConfig.selectedStt(plainPrefs(ctx)) }
+
+    fun putSttApiKey(
+        ctx: Context,
+        value: String,
+        provider: Provider? = null,
+    ) = putScopedKey(ctx, KEY_STT_API_KEY, provider?.let(::sttKeyFor), value)
+
+    fun getChatApiKey(
+        ctx: Context,
+        provider: Provider? = null,
+    ): String = getScopedKey(ctx, KEY_CHAT_API_KEY, provider?.let(::chatKeyFor), provider) { ProviderConfig.selectedChat(plainPrefs(ctx)) }
+
+    fun putChatApiKey(
+        ctx: Context,
+        value: String,
+        provider: Provider? = null,
+    ) = putScopedKey(ctx, KEY_CHAT_API_KEY, provider?.let(::chatKeyFor), value)
+
+    fun hasSttApiKey(
+        ctx: Context,
+        provider: Provider? = null,
+    ): Boolean = getSttApiKey(ctx, provider).isNotBlank()
+
+    fun hasChatApiKey(
+        ctx: Context,
+        provider: Provider? = null,
+    ): Boolean = getChatApiKey(ctx, provider).isNotBlank()
+
+    private fun getScopedKey(
+        ctx: Context,
+        purposeKey: String,
+        providerKey: String?,
+        provider: Provider?,
+        selected: () -> Provider,
+    ): String {
+        if (provider == null || providerKey == null) return getKey(ctx, purposeKey)
+        val scoped = getKey(ctx, providerKey)
+        if (scoped.isNotBlank()) return scoped
+        // The shared slot only ever held the *selected* provider's key, so it is
+        // only a safe fallback for that provider. Handing the primary's key to a
+        // backup would just earn a 401 — and a needless 24 h block.
+        return if (provider == selected()) getKey(ctx, purposeKey) else ""
+    }
+
+    private fun putScopedKey(
+        ctx: Context,
+        purposeKey: String,
+        providerKey: String?,
+        value: String,
+    ) {
+        if (providerKey == null) {
+            putKey(ctx, purposeKey, value)
+            return
+        }
+        putKey(ctx, providerKey, value)
+        // Mirror into the purpose slot only while it is still empty: that keeps
+        // legacy single-key call sites and the "is anything configured?" checks
+        // working without letting a second provider clobber the first one's key.
+        if (value.isNotBlank() && getKey(ctx, purposeKey).isBlank()) putKey(ctx, purposeKey, value)
+    }
 }

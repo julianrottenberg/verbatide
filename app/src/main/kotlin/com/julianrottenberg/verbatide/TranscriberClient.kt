@@ -67,7 +67,7 @@ object TranscriberClient {
             // told which language to keep. Not all providers support it —
             // Together rejects it, so omit for Together.
             .let { b ->
-                if (!sttUrl.contains("together.ai")) b.addFormDataPart("response_format", "verbose_json") else b
+                if (!sttUrl.contains("together.ai") && !isMiniMaxUrl(sttUrl)) b.addFormDataPart("response_format", "verbose_json") else b
             }
 
         // Pinning the language prevents drift-to-English for non-English speech.
@@ -99,11 +99,19 @@ object TranscriberClient {
 
         val body = bodyBuilder.build()
 
-        val request = Request.Builder()
-            .url(sttUrl)
-            .header("Authorization", "Bearer $apiKey")
-            .post(body)
-            .build()
+        val request =
+            Request.Builder()
+                .url(sttUrl)
+                .header("Authorization", "Bearer $apiKey")
+                // MiniMax ASR is the odd one out: it wants `language` as a BCP-47
+                // *header*, not a form field, and documents no prompt/citation
+                // hint at all (DictionaryManager.promptStyleFor returns NONE).
+                .apply {
+                    if (isMiniMaxUrl(sttUrl) && !language.isNullOrBlank() && language != "auto") {
+                        header("language", language)
+                    }
+                }.post(body)
+                .build()
 
         // Together: when `language` is known, always pass it (prevents STT
         // translating to English). verbose_json is not supported there so
@@ -119,8 +127,12 @@ object TranscriberClient {
             override fun onResponse(call: Call, response: Response) {
                 currentCall = null
                 val body = response.body?.string() ?: ""
-                if (!response.isSuccessful && body.isBlank()) {
-                    callback(Result(null, "HTTP ${response.code}"))
+                if (!response.isSuccessful) {
+                    // Keep the status code: ProviderHealth.classify() drives the
+                    // backup switch from it (402 = out of quota, 401 = bad key),
+                    // and providers disagree wildly about error body shapes.
+                    val detail = if (body.isBlank()) null else runCatching { parseResponse(body).error }.getOrNull()
+                    callback(Result(null, "HTTP ${response.code}" + (detail?.let { ": $it" } ?: "")))
                     return
                 }
                 if (body.length > MAX_RESPONSE_CHARS + 2048) {
@@ -136,4 +148,7 @@ object TranscriberClient {
             }
         })
     }
+
+    /** MiniMax's ASR endpoint is OpenAI-shaped but takes `language` as a header. */
+    internal fun isMiniMaxUrl(url: String): Boolean = url.contains("minimax")
 }

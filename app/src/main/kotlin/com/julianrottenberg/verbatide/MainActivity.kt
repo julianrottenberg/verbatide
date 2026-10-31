@@ -55,6 +55,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var reasoningRow: LinearLayout
     private lateinit var languageRow: LinearLayout
     private lateinit var languageRowSub: TextView
+    private lateinit var backupRowSub: TextView
+    private lateinit var usageRowSub: TextView
+    private lateinit var backupKeyRowSub: TextView
 
     // SAF launchers for settings backup/restore. Must be field initializers so
     // they register before the activity is created.
@@ -94,6 +97,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         PostProcessor.migrateLegacyDefaultPrompt(this)
+        // Once a day, and only off the dictation path: recover from a top-up
+        // without ever paying the probe latency while transcribing.
+        QuotaChecker.maybeCheckDaily(this)
 
         val root = vertical(0, 0)
 
@@ -306,6 +312,23 @@ class MainActivity : AppCompatActivity() {
         chatProviderContainer.addView(chatKeyRow)
         root.addView(chatProviderContainer)
 
+        // --- Fallback provider ---
+        // One account funds both halves, so a single choice covers STT *and*
+        // cleanup. Shown even when local STT is active: cleanup still needs it.
+        root.addView(sectionHeader("Fallback"))
+        val backupRow = settingsRow("Backup provider", ProviderConfig.backupSummary(prefs())) { promptBackupProvider() }
+        backupRowSub = backupRow.findViewWithTag("subtitle")
+        root.addView(backupRow)
+        // The backup's account is a *different* account, so it needs its own key
+        // slot — one value feeds both its STT and its cleanup endpoint.
+        val backupKeyRow = settingsRow("Backup key", backupKeySubtitle()) { promptBackupKey() }
+        backupKeyRowSub = backupKeyRow.findViewWithTag("subtitle")
+        root.addView(backupKeyRow)
+
+        val usageRow = settingsRow("Usage check", QuotaChecker.describe(prefs())) { checkUsageNow() }
+        usageRowSub = usageRow.findViewWithTag("subtitle")
+        root.addView(usageRow)
+
         // --- Backup & restore ---
         root.addView(sectionHeader("Backup & restore"))
         root.addView(
@@ -382,6 +405,7 @@ class MainActivity : AppCompatActivity() {
                 Provider.VENICE -> "api.venice.ai · ${defaults.sttModel} · ${defaults.chatModel}"
                 Provider.MISTRAL -> "api.mistral.ai · voxtral-mini-latest · mistral-small"
                 Provider.NANOGPT -> "api.nano-gpt.com · Whisper-Large-V3 · gpt-4o-mini"
+                Provider.MINIMAX -> "api.minimax.io · asr-1.0 · M3.1-Flash"
                 Provider.FAL -> "queue.fal.run · wizper (STT only)"
                 Provider.CUSTOM -> if (isStt) "Your own STT endpoint" else "Your own chat endpoint"
             }
@@ -711,6 +735,9 @@ class MainActivity : AppCompatActivity() {
         // Provider summary + radio states
         providerSummarySub.text = ProviderConfig.sttSummary(prefs())
         chatSummarySub.text = ProviderConfig.chatSummary(prefs())
+        backupRowSub.text = ProviderConfig.backupSummary(prefs())
+        backupKeyRowSub.text = backupKeySubtitle()
+        usageRowSub.text = QuotaChecker.describe(prefs())
         refreshProviderRows()
 
         customSttUrlSub.text = providerCustomSttUrlSubtitle()
@@ -742,6 +769,7 @@ class MainActivity : AppCompatActivity() {
                 Provider.OPENROUTER -> "OpenRouter STT key"
                 Provider.TOGETHER -> "Together AI STT key"
                 Provider.FAL -> "fal.ai key"
+                Provider.MINIMAX -> "MiniMax STT key"
                 Provider.CUSTOM -> "STT API key"
                 else -> "OpenAI STT key"
             }
@@ -760,6 +788,7 @@ class MainActivity : AppCompatActivity() {
                 Provider.GROQ -> "Groq cleanup key"
                 Provider.OPENROUTER -> "OpenRouter cleanup key"
                 Provider.TOGETHER -> "Together AI cleanup key"
+                Provider.MINIMAX -> "MiniMax cleanup key"
                 Provider.CUSTOM -> "Cleanup API key"
                 else -> "OpenAI cleanup key"
             }
@@ -781,6 +810,7 @@ class MainActivity : AppCompatActivity() {
                 Provider.OPENROUTER -> "OpenRouter API key"
                 Provider.TOGETHER -> "Together AI API key"
                 Provider.FAL -> "fal.ai key"
+                Provider.MINIMAX -> "MiniMax API key"
                 Provider.CUSTOM -> "API key"
                 else -> "OpenAI API key"
             }
@@ -831,6 +861,7 @@ class MainActivity : AppCompatActivity() {
                 Provider.GROQ -> "gsk_..."
                 Provider.OPENROUTER -> "sk-or-..."
                 Provider.TOGETHER -> "tgp_..."
+                Provider.MINIMAX -> "JWT from platform.minimax.io"
                 Provider.FAL -> "fal key — see https://fal.ai/dashboard/keys"
                 else -> "sk-..."
             }
@@ -865,6 +896,7 @@ class MainActivity : AppCompatActivity() {
                 Provider.GROQ -> "gsk_..."
                 Provider.OPENROUTER -> "sk-or-..."
                 Provider.TOGETHER -> "tgp_..."
+                Provider.MINIMAX -> "JWT from platform.minimax.io"
                 Provider.FAL -> "fal key"
                 else -> "sk-..."
             }
@@ -1023,6 +1055,89 @@ class MainActivity : AppCompatActivity() {
                 refresh()
             }.setNegativeButton("Cancel", null)
             .show()
+    }
+
+    // --- Fallback provider + usage check ---
+
+    private fun promptBackupProvider() {
+        val options = listOf<Provider?>(null) + ProviderConfig.backupProviders
+        val labels = options.map { it?.displayName ?: "None" }.toTypedArray()
+        val current = options.indexOf(ProviderConfig.backupProvider(prefs())).coerceAtLeast(0)
+        android.app.AlertDialog
+            .Builder(this)
+            .setTitle("Backup provider")
+            .setSingleChoiceItems(labels, current) { dialog, which ->
+                dialog.dismiss()
+                val picked = options[which]
+                val primary = listOf(ProviderConfig.selectedStt(prefs()), ProviderConfig.selectedChat(prefs()))
+                if (picked != null && picked in primary) {
+                    toast("${picked.displayName} is already the primary — pick another")
+                    return@setSingleChoiceItems
+                }
+                ProviderConfig.saveBackupProvider(prefs(), picked)
+                refresh()
+            }.setNegativeButton("Cancel", null)
+            .show()
+    }
+    /** One key per backup account: `asr-1.0` and the chat endpoint bill together. */
+    private fun backupKeySubtitle(): String {
+        val provider = ProviderConfig.backupProvider(prefs()) ?: return "Pick a backup provider first"
+        val stt = SecurePrefs.hasSttApiKey(this, provider)
+        val chat = SecurePrefs.hasChatApiKey(this, provider)
+        return when {
+            stt && chat -> "${provider.displayName} key set — covers STT and cleanup"
+            stt || chat -> "${provider.displayName} key only covers ${if (stt) "STT" else "cleanup"}"
+            else -> "Tap to add ${provider.displayName}'s key"
+        }
+    }
+
+    private fun promptBackupKey() {
+        val provider = ProviderConfig.backupProvider(prefs())
+        if (provider == null) {
+            toast("Pick a backup provider first")
+            return
+        }
+        val hint =
+            when (provider) {
+                Provider.MINIMAX -> "JWT from platform.minimax.io"
+                Provider.GROQ -> "gsk_..."
+                Provider.OPENROUTER -> "sk-or-..."
+                Provider.TOGETHER -> "tgp_..."
+                else -> "sk-..."
+            }
+        val outer = this
+        val existing = SecurePrefs.getSttApiKey(outer, provider).ifBlank { SecurePrefs.getChatApiKey(outer, provider) }
+        val input =
+            EditText(this).apply {
+                this.hint = hint
+                setText(existing)
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
+        android.app.AlertDialog
+            .Builder(this)
+            .setTitle("${provider.displayName} backup key")
+            .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
+            .setPositiveButton("Save") { _, _ ->
+                val value = input.text.toString()
+                // Written to the provider's own slots, never the shared ones, so
+                // the primary's key stays untouched.
+                SecurePrefs.putSttApiKey(outer, value, provider)
+                SecurePrefs.putChatApiKey(outer, value, provider)
+                refresh()
+            }.setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /**
+     * Runs the probe off the main thread and shows the result in place. The
+     * daily automatic check uses the same path; this is just the manual nudge.
+     */
+    private fun checkUsageNow() {
+        usageRowSub.text = "Checking…"
+        QuotaChecker.checkNow(this) { summary ->
+            toast(summary)
+            refresh()
+        }
     }
 
     // --- Transcription language ---

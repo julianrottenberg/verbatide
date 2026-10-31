@@ -21,6 +21,7 @@ object SettingsBackup {
             "provider",
             "stt_provider",
             "chat_provider",
+            "backup_provider",
             "custom_stt_base_url",
             "custom_stt_model",
             "custom_chat_base_url",

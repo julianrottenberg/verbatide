@@ -141,8 +141,7 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
 </examples>"""
 
     /** True when the stored prompt is the legacy default verbatim (never customized). */
-    fun isLegacyDefaultPrompt(stored: String?): Boolean =
-        stored != null && stored.trim() == LEGACY_DEV_PROMPT.trim()
+    fun isLegacyDefaultPrompt(stored: String?): Boolean = stored != null && stored.trim() == LEGACY_DEV_PROMPT.trim()
 
     /**
      * Upgrades a pinned legacy default prompt to the new DEFAULT_PROMPT.
@@ -425,6 +424,13 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
         reasoning: Reasoning,
     ) {
         if (reasoning == Reasoning.DEFAULT) return
+        // MiniMax: thinking cannot be disabled (400 "requires adaptive thinking")
+        // and effort defaults to `max`, which is nonsense for a 200-word cleanup.
+        // Collapse OFF onto low, the fastest documented setting.
+        if (chatUrl.contains("minimax")) {
+            bodyJson.put("reasoning_effort", if (reasoning == Reasoning.OFF) "low" else reasoning.key)
+            return
+        }
         val isOpenRouter = chatUrl.contains("openrouter.ai")
         val isTogether = chatUrl.contains("together.ai")
         val isOpenAiFamily = chatUrl.contains("api.openai.com") || chatUrl.contains("api.groq.com")
