@@ -71,12 +71,17 @@ jobs:
           fi
 
       - name: Upload APK
+        # The v4 artifact API is GitHub-only; Forgejo has not implemented it
+        # (it still supports v3, which GitHub has sunset). CI artifacts are a
+        # GitHub nicety — on Forgejo the release job ships the APK instead.
+        if: github.server_url == 'https://github.com'
         uses: actions/upload-artifact@v4
         with:
           name: verbatide-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
       - name: Upload APK (legacy app-debug.apk fallback)
+        if: github.server_url == 'https://github.com'
         uses: actions/upload-artifact@v4
         with:
           name: verbatide-debug-apk-legacy
