@@ -84,6 +84,7 @@ class WhisperAccessibilityService : AccessibilityService() {
     private var feedbackView: TextView? = null
     private var layoutParams: WindowManager.LayoutParams? = null
     private var feedbackLayoutParams: WindowManager.LayoutParams? = null
+
     @Volatile
     private var audioRecord: AudioRecord? = null
 
@@ -104,12 +105,14 @@ class WhisperAccessibilityService : AccessibilityService() {
     // from the saveAudio worker thread and read from OkHttp callbacks, so the
     // pair must be visible across threads.
     @Volatile private var pendingRecordingId: String? = null
+
     @Volatile private var pendingRecordingDurMs: Int = 0
 
     // The service's own in-flight transports. The old global cancel slots were
     // removed because a benchmark or redo run would clobber them; each caller
     // now holds its own Call. FAL manages its own (FalTranscriber.cancel).
     @Volatile private var sttCall: Call? = null
+
     @Volatile private var cleanupCall: Call? = null
     private val handler = Handler(Looper.getMainLooper())
 
@@ -932,7 +935,10 @@ class WhisperAccessibilityService : AccessibilityService() {
             if (!blank && error == null) {
                 ProviderHealth.clear(prefs(), provider, ProviderConfig.Purpose.STT)
                 ProviderHealth.markOk(prefs(), provider, ProviderConfig.Purpose.STT)
-                LogStore.add(TAG, "STT ${provider.displayName} OK in ${ms}ms, ${text.orEmpty().length} chars${language?.let { ", lang=$it" } ?: ""}")
+                LogStore.add(
+                    TAG,
+                    "STT ${provider.displayName} OK in ${ms}ms, ${text.orEmpty().length} chars${language?.let { ", lang=$it" } ?: ""}",
+                )
                 // Prefer the user-pinned language; fall back to the provider's
                 // detected language so cleanup knows what NOT to translate.
                 val pinned = prefs().getString("stt_language", "auto") ?: "auto"
@@ -1207,62 +1213,62 @@ class WhisperAccessibilityService : AccessibilityService() {
             ) { result ->
                 handler.post {
                     if (token != attemptToken) return@post
-                val cleaned = result.text
-                if (!cleaned.isNullOrBlank()) {
-                    ProviderHealth.clear(prefs(), provider, ProviderConfig.Purpose.CHAT)
-                    ProviderHealth.markOk(prefs(), provider, ProviderConfig.Purpose.CHAT)
-                    LogStore.add(
-                        TAG,
-                        "Cleanup ${provider.displayName} OK in ${android.os.SystemClock.elapsedRealtime() - startedAt}ms, ${cleaned.length} chars",
-                    )
-                    injectText(cleaned)
-                    record(
-                        stt.copy(
-                            ts = System.currentTimeMillis(),
-                            text = cleaned,
-                            // Keep the pre-cleanup text so "try another cleanup"
-                            // has something to send without another STT round-trip.
-                            rawText = stt.text,
-                            cleaned = true,
-                            cleanupProvider = provider.name.lowercase(),
-                            cleanupModel = model,
-                            reasoning =
-                                if (reasoning == PostProcessor.Reasoning.DEFAULT ||
-                                    reasoning == PostProcessor.Reasoning.AUTO
-                                ) {
-                                    ""
-                                } else {
-                                    reasoning.key
-                                },
-                            cleanupMs = android.os.SystemClock.elapsedRealtime() - startedAt,
-                        ),
-                    )
-                } else if (switchToBackup(provider, ProviderConfig.Purpose.CHAT, result.error, usable, index)) {
-                    attemptCleanup(text, prompt, usable, index + 1, stt)
-                    return@post
-                } else {
-                    // Surface the actual cause (HTTP code, provider message) so
-                    // "cleanup doesn't work" is debuggable from the toast alone.
-                    val reason = SecurePrefs.redact(result.error).take(90).ifBlank { null }
-                    Log.w(TAG, "Cleanup failed, falling back to raw text: $reason")
-                    LogStore.add(TAG, "Cleanup ${provider.displayName} failed: ${SecurePrefs.redact(result.error)}")
-                    injectText(
-                        text,
-                        feedback = if (reason != null) "Cleanup failed: $reason" else "Cleanup failed — raw copied to clipboard",
-                        feedbackDurationMs = 4000,
-                    )
-                    record(
-                        stt.copy(
-                            ts = System.currentTimeMillis(),
-                            failure = SecurePrefs.redact(result.error ?: "cleanup failed").take(200),
-                        ),
-                    )
+                    val cleaned = result.text
+                    if (!cleaned.isNullOrBlank()) {
+                        ProviderHealth.clear(prefs(), provider, ProviderConfig.Purpose.CHAT)
+                        ProviderHealth.markOk(prefs(), provider, ProviderConfig.Purpose.CHAT)
+                        LogStore.add(
+                            TAG,
+                            "Cleanup ${provider.displayName} OK in ${android.os.SystemClock.elapsedRealtime() - startedAt}ms, ${cleaned.length} chars",
+                        )
+                        injectText(cleaned)
+                        record(
+                            stt.copy(
+                                ts = System.currentTimeMillis(),
+                                text = cleaned,
+                                // Keep the pre-cleanup text so "try another cleanup"
+                                // has something to send without another STT round-trip.
+                                rawText = stt.text,
+                                cleaned = true,
+                                cleanupProvider = provider.name.lowercase(),
+                                cleanupModel = model,
+                                reasoning =
+                                    if (reasoning == PostProcessor.Reasoning.DEFAULT ||
+                                        reasoning == PostProcessor.Reasoning.AUTO
+                                    ) {
+                                        ""
+                                    } else {
+                                        reasoning.key
+                                    },
+                                cleanupMs = android.os.SystemClock.elapsedRealtime() - startedAt,
+                            ),
+                        )
+                    } else if (switchToBackup(provider, ProviderConfig.Purpose.CHAT, result.error, usable, index)) {
+                        attemptCleanup(text, prompt, usable, index + 1, stt)
+                        return@post
+                    } else {
+                        // Surface the actual cause (HTTP code, provider message) so
+                        // "cleanup doesn't work" is debuggable from the toast alone.
+                        val reason = SecurePrefs.redact(result.error).take(90).ifBlank { null }
+                        Log.w(TAG, "Cleanup failed, falling back to raw text: $reason")
+                        LogStore.add(TAG, "Cleanup ${provider.displayName} failed: ${SecurePrefs.redact(result.error)}")
+                        injectText(
+                            text,
+                            feedback = if (reason != null) "Cleanup failed: $reason" else "Cleanup failed — raw copied to clipboard",
+                            feedbackDurationMs = 4000,
+                        )
+                        record(
+                            stt.copy(
+                                ts = System.currentTimeMillis(),
+                                failure = SecurePrefs.redact(result.error ?: "cleanup failed").take(200),
+                            ),
+                        )
+                    }
+                    state = State.IDLE
+                    setBusy(false)
+                    setAppearance(COLOR_IDLE)
                 }
-                state = State.IDLE
-                setBusy(false)
-                setAppearance(COLOR_IDLE)
             }
-        }
     }
 
     /**
