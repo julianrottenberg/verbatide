@@ -50,7 +50,9 @@ jobs:
           fi
           CMDLINE="$SDK/cmdline-tools"
           SDKMANAGER="$(find "$CMDLINE" -name sdkmanager -print -quit)"
-          yes | "$SDKMANAGER" --licenses > /dev/null
+          # `yes` SIGPIPEs when sdkmanager exits; forgejo-runner/act runs bash with
+          # -o pipefail (GitHub does not), so a bare `yes |` fails the step with 141.
+          (yes || true) | "$SDKMANAGER" --licenses > /dev/null
           "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Build debug APK
@@ -118,7 +120,7 @@ jobs:
           fi
           CMDLINE="$SDK/cmdline-tools"
           SDKMANAGER="$(find "$CMDLINE" -name sdkmanager -print -quit)"
-          yes | "$SDKMANAGER" --licenses > /dev/null
+          (yes || true) | "$SDKMANAGER" --licenses > /dev/null
           "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Build release APK
