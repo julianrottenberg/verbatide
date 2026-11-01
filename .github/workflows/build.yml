@@ -32,10 +32,22 @@ jobs:
           cache: gradle
 
       - name: Install Android SDK packages
-        # The runner image ships the SDK, and setup-android@v3 fails on
-        # `sdkmanager tools`, so install the packages directly.
+        # GitHub-hosted runners ship the SDK at /usr/local/lib/android/sdk;
+        # anywhere else (Forgejo, plain node images) download the
+        # commandline-tools ourselves first. Works on both.
         run: |
+          set -eu
           SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          if [ ! -d "$SDK/cmdline-tools" ]; then
+            echo "No preinstalled SDK at $SDK — fetching commandline-tools"
+            SDK="$HOME/android-sdk"
+            mkdir -p "$SDK/cmdline-tools"
+            curl -fsSL -o /tmp/tools.zip \
+              https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            unzip -q /tmp/tools.zip -d "$SDK/cmdline-tools"
+            mv "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
+            echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          fi
           CMDLINE="$SDK/cmdline-tools"
           SDKMANAGER="$(find "$CMDLINE" -name sdkmanager -print -quit)"
           yes | "$SDKMANAGER" --licenses > /dev/null
@@ -88,10 +100,22 @@ jobs:
           cache: gradle
 
       - name: Install Android SDK packages
-        # The runner image ships the SDK, and setup-android@v3 fails on
-        # `sdkmanager tools`, so install the packages directly.
+        # GitHub-hosted runners ship the SDK at /usr/local/lib/android/sdk;
+        # anywhere else (Forgejo, plain node images) download the
+        # commandline-tools ourselves first. Works on both.
         run: |
+          set -eu
           SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          if [ ! -d "$SDK/cmdline-tools" ]; then
+            echo "No preinstalled SDK at $SDK — fetching commandline-tools"
+            SDK="$HOME/android-sdk"
+            mkdir -p "$SDK/cmdline-tools"
+            curl -fsSL -o /tmp/tools.zip \
+              https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            unzip -q /tmp/tools.zip -d "$SDK/cmdline-tools"
+            mv "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
+            echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          fi
           CMDLINE="$SDK/cmdline-tools"
           SDKMANAGER="$(find "$CMDLINE" -name sdkmanager -print -quit)"
           yes | "$SDKMANAGER" --licenses > /dev/null
