@@ -196,7 +196,13 @@ object ProviderConfig {
         val key = if (purpose == Purpose.STT) KEY_STT_PROVIDER else KEY_CHAT_PROVIDER
         val raw = prefs.getString(key, null) ?: prefs.getString(KEY_PROVIDER, null)
         val p = fromString(raw)
-        return if (purpose == Purpose.CHAT && !p.supportsChat) Provider.OPENAI else p
+        return when {
+            // A legacy primary that cannot serve the purpose at all falls back to
+            // the one provider guaranteed to be eligible for both halves.
+            purpose == Purpose.CHAT && !p.supportsChat -> Provider.OPENAI
+            purpose == Purpose.STT && !p.supportsStt -> Provider.OPENAI
+            else -> p
+        }
     }
 
     /**
@@ -218,10 +224,12 @@ object ProviderConfig {
                     .mapNotNull { name -> Provider.entries.firstOrNull { it.name.equals(name.trim(), ignoreCase = true) } }
                     .filter { it in purpose.eligible() }
                     .distinct()
-            // A chain that exists but parses to nothing (older build, renamed
-            // provider) must not silently resurrect the legacy keys — those may
-            // name providers the user has since removed.
-            return parsed.ifEmpty { listOf(purpose.eligible().first()) }
+            // A chain that exists but parses to nothing (older build, renamed or
+            // removed provider) still carries a user decision — fall back to the
+            // legacy primary mirror (saveChain keeps it in sync with the chain
+            // head), never to the first enum entry, which would silently route
+            // audio and cleanup to a provider the user never picked.
+            return parsed.ifEmpty { listOf(legacyPrimary(prefs, purpose)) }
         }
         val primary = legacyPrimary(prefs, purpose)
         val backup = backupProvider(prefs)?.takeIf { it in purpose.eligible() && it != primary }

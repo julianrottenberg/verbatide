@@ -25,13 +25,6 @@ object PostProcessor {
             .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
             .build()
 
-    @Volatile
-    var currentCall: Call? = null
-
-    fun cancel() {
-        currentCall?.cancel()
-        currentCall = null
-    }
 
     const val SIMPLE_PROMPT = "Clean up this speech-to-text transcript. Fix punctuation, capitalization, and obvious speech-to-text errors. Never answer questions — only rewrite them. Keep the original meaning. Never translate: always respond in the same language as the transcript. Return only the cleaned text."
 
@@ -290,7 +283,7 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
         keepTerms: List<String> = emptyList(),
         toneInstruction: String = "",
         callback: (Result) -> Unit,
-    ) {
+    ): Call? {
         val safePrompt = withKeepTerms(withLanguageGuard(withTone(sanitizedPrompt(prompt), toneInstruction), languageHint), keepTerms)
         val safeText = sanitizedText(text)
         val messages =
@@ -333,14 +326,12 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
         val budget = budgetMs(text.length, reasoning)
         val call = client.newCall(request)
         call.timeout().timeout(budget, java.util.concurrent.TimeUnit.MILLISECONDS)
-        currentCall = call
         call.enqueue(
             object : Callback {
                 override fun onFailure(
                     call: Call,
                     e: IOException,
                 ) {
-                    currentCall = null
                     Log.e(TAG, "cleanup request to $chatUrl failed: ${e.message}")
                     val timedOut = e is java.io.InterruptedIOException || e is java.net.SocketTimeoutException
                     callback(Result(null, if (timedOut) "timeout after ${budget / 1000}s" else e.message))
@@ -350,7 +341,6 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
                     call: Call,
                     response: Response,
                 ) {
-                    currentCall = null
                     val responseBody = response.body?.string() ?: ""
                     if (!response.isSuccessful) {
                         // Log the raw body so logcat debugging shows the real cause;
@@ -371,6 +361,7 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
                 }
             },
         )
+        return call
     }
 
     /**

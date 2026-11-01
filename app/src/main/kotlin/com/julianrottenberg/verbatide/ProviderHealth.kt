@@ -14,9 +14,10 @@ import android.content.SharedPreferences
  * [BLOCK_TTL_MS] — the daily usage check clears a block earlier as soon as the
  * primary works again.
  *
- * Blocked state is per provider, not per purpose: one account balance funds
- * both the STT and the chat endpoint, which is exactly why a single switch to
- * the backup covers both halves.
+ * Blocks are per purpose as well as per provider: API keys are scoped per
+ * purpose now, so a 401 on a broken STT key says nothing about the chat key of
+ * the same provider (and the daily check only probes the chat endpoint — it
+ * must not be able to pull a working provider out of the transcription chain).
  */
 object ProviderHealth {
     const val BLOCK_TTL_MS = 24L * 60 * 60 * 1000
@@ -33,18 +34,20 @@ object ProviderHealth {
     )
 
     /**
-     * Whether a provider is worth trying. Expired entries are dropped lazily so
-     * a stale block can never outlive its TTL because nothing wrote to prefs.
+     * Whether a provider is worth trying for [purpose]. Expired entries are
+     * dropped lazily so a stale block can never outlive its TTL because nothing
+     * wrote to prefs.
      */
     fun blocked(
         prefs: SharedPreferences,
         provider: Provider,
+        purpose: ProviderConfig.Purpose,
         now: Long = System.currentTimeMillis(),
     ): Block? {
-        val raw = prefs.getString(key(provider), null) ?: return null
+        val raw = prefs.getString(key(provider, purpose), null) ?: return null
         val at = raw.substringBefore('|').toLongOrNull()
         if (at == null || now - at > BLOCK_TTL_MS) {
-            prefs.edit().remove(key(provider)).apply()
+            prefs.edit().remove(key(provider, purpose)).apply()
             return null
         }
         return Block(raw.substringAfter('|', ""), at)
@@ -53,12 +56,14 @@ object ProviderHealth {
     fun isBlocked(
         prefs: SharedPreferences,
         provider: Provider,
+        purpose: ProviderConfig.Purpose,
         now: Long = System.currentTimeMillis(),
-    ): Boolean = blocked(prefs, provider, now) != null
+    ): Boolean = blocked(prefs, provider, purpose, now) != null
 
     fun block(
         prefs: SharedPreferences,
         provider: Provider,
+        purpose: ProviderConfig.Purpose,
         reason: String,
         now: Long = System.currentTimeMillis(),
     ) {
@@ -67,7 +72,7 @@ object ProviderHealth {
         val safe = SecurePrefs.redact(reason).take(200)
         prefs
             .edit()
-            .putString(key(provider), "$now|$safe")
+            .putString(key(provider, purpose), "$now|$safe")
             .apply()
     }
 
@@ -75,8 +80,9 @@ object ProviderHealth {
     fun clear(
         prefs: SharedPreferences,
         provider: Provider,
+        purpose: ProviderConfig.Purpose,
     ) {
-        if (prefs.contains(key(provider))) prefs.edit().remove(key(provider)).apply()
+        if (prefs.contains(key(provider, purpose))) prefs.edit().remove(key(provider, purpose)).apply()
     }
 
     /**
@@ -84,11 +90,13 @@ object ProviderHealth {
      *
      * Deliberately conservative: 429 (rate limit) and 5xx are transient and a
      * 24 h block would be wrong, so they stay [Failure.OTHER] and the caller
-     * just surfaces the error.
+     * just surfaces the error. An HTML body is a CDN/WAF interstitial, not a
+     * provider verdict — a Cloudflare 403 page must not park the provider.
      */
     fun classify(error: String?): Failure {
         val e = error?.lowercase().orEmpty().trim()
         if (e.isEmpty()) return Failure.OTHER
+        if (e.contains("<html") || e.contains("<!doctype")) return Failure.OTHER
         // Match real status codes, not digits inside ids ("14032", "4031 ms").
         val http402 = Regex("""\b402\b""").containsMatchIn(e)
         val http401or403 = Regex("""\b40[13]\b""").containsMatchIn(e)
@@ -106,7 +114,6 @@ object ProviderHealth {
                 e.contains("unauthor") ||
                 e.contains("forbidden") ||
                 e.contains("invalid api key") ||
-                e.contains("api key") ||
                 e.contains("secret key") ||
                 e.contains("login fail") ||
                 e.contains("authentication") ||
@@ -116,19 +123,21 @@ object ProviderHealth {
         }
     }
 
-    /** Records that [provider] served a real request at [now] — drives the status row. */
+    /** Records that [provider] served a real [purpose] request at [now] — drives the status row. */
     fun markOk(
         prefs: SharedPreferences,
         provider: Provider,
+        purpose: ProviderConfig.Purpose,
         now: Long = System.currentTimeMillis(),
     ) {
-        prefs.edit().putLong(okKey(provider), now).apply()
+        prefs.edit().putLong(okKey(provider, purpose), now).apply()
     }
 
     fun lastOk(
         prefs: SharedPreferences,
         provider: Provider,
-    ): Long = prefs.getLong(okKey(provider), 0L)
+        purpose: ProviderConfig.Purpose,
+    ): Long = prefs.getLong(okKey(provider, purpose), 0L)
 
     /**
      * Providers to try for [purpose], in chain order, minus anything currently
@@ -142,7 +151,7 @@ object ProviderHealth {
         now: Long = System.currentTimeMillis(),
     ): List<Provider> {
         val full = ProviderConfig.chain(prefs, purpose)
-        val healthy = full.filter { blocked(prefs, it, now) == null }
+        val healthy = full.filter { blocked(prefs, it, purpose, now) == null }
         return healthy.ifEmpty { full }
     }
 
@@ -154,9 +163,10 @@ object ProviderHealth {
     fun statusLine(
         prefs: SharedPreferences,
         provider: Provider,
+        purpose: ProviderConfig.Purpose,
         now: Long = System.currentTimeMillis(),
     ): String {
-        val paused = blocked(prefs, provider, now)
+        val paused = blocked(prefs, provider, purpose, now)
         if (paused != null) {
             val why =
                 if (paused.reason.length <= 40) {
@@ -166,12 +176,18 @@ object ProviderHealth {
                 }
             return "$why · ${QuotaChecker.timeAgo(now - paused.at)}"
         }
-        val ok = lastOk(prefs, provider)
+        val ok = lastOk(prefs, provider, purpose)
         if (ok > 0L) return "OK · checked ${QuotaChecker.timeAgo(now - ok)}"
-        return if (prefs.contains(key(provider))) "OK" else "not checked yet"
+        return if (prefs.contains(key(provider, purpose))) "OK" else "not checked yet"
     }
 
-    private fun okKey(provider: Provider) = OK_PREFIX + provider.name.lowercase()
+    private fun okKey(
+        provider: Provider,
+        purpose: ProviderConfig.Purpose,
+    ) = OK_PREFIX + purpose.name.lowercase() + "_" + provider.name.lowercase()
 
-    private fun key(provider: Provider) = PREFIX + provider.name.lowercase()
+    private fun key(
+        provider: Provider,
+        purpose: ProviderConfig.Purpose,
+    ) = PREFIX + purpose.name.lowercase() + "_" + provider.name.lowercase()
 }

@@ -64,8 +64,8 @@ object RedoTranscribe {
         val deliver: (String?, String?, String?) -> Unit = cb@{ text, detected, error ->
             val ms = System.currentTimeMillis() - startedAt
             if (!text.isNullOrBlank() && error == null) {
-                ProviderHealth.clear(prefs, provider)
-                ProviderHealth.markOk(prefs, provider)
+                ProviderHealth.clear(prefs, provider, ProviderConfig.Purpose.STT)
+                ProviderHealth.markOk(prefs, provider, ProviderConfig.Purpose.STT)
                 LogStore.add(
                     "redo",
                     "Re-transcribed with ${provider.displayName} in ${ms}ms, ${text.length} chars",
@@ -76,7 +76,7 @@ object RedoTranscribe {
                 val failure = ProviderHealth.classify(reason)
                 LogStore.add("redo", "Re-transcribe ${provider.displayName} failed: ${SecurePrefs.redact(reason)}")
                 if (failure != ProviderHealth.Failure.OTHER) {
-                    ProviderHealth.block(prefs, provider, reason)
+                    ProviderHealth.block(prefs, provider, ProviderConfig.Purpose.STT, reason)
                     if (index + 1 < chain.size) {
                         attempt(ctx, chain, index + 1, wav, language, vocabulary, onDone)
                         return@cb

@@ -26,6 +26,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import java.io.ByteArrayOutputStream
+import okhttp3.Call
 import kotlin.concurrent.thread
 import kotlin.math.abs
 
@@ -99,9 +100,17 @@ class WhisperAccessibilityService : AccessibilityService() {
     private var attemptToken = 0L
 
     // Audio retained for this dictation, if the user opted in. Cleared once an
-    // entry records it, so a later dictation never claims the same file.
-    private var pendingRecordingId: String? = null
-    private var pendingRecordingDurMs: Int = 0
+    // entry records it, so a later dictation never claims the same file. Written
+    // from the saveAudio worker thread and read from OkHttp callbacks, so the
+    // pair must be visible across threads.
+    @Volatile private var pendingRecordingId: String? = null
+    @Volatile private var pendingRecordingDurMs: Int = 0
+
+    // The service's own in-flight transports. The old global cancel slots were
+    // removed because a benchmark or redo run would clobber them; each caller
+    // now holds its own Call. FAL manages its own (FalTranscriber.cancel).
+    @Volatile private var sttCall: Call? = null
+    @Volatile private var cleanupCall: Call? = null
     private val handler = Handler(Looper.getMainLooper())
 
     // Last text this service injected, so "delete that" knows what to remove.
@@ -367,8 +376,13 @@ class WhisperAccessibilityService : AccessibilityService() {
         runCatching { audioRecord?.release() }
         audioRecord = null
         pcmStream = null
-        TranscriberClient.cancel()
-        PostProcessor.cancel()
+        pendingRecordingId = null
+        pendingRecordingDurMs = 0
+        sttCall?.cancel()
+        sttCall = null
+        FalTranscriber.cancel()
+        cleanupCall?.cancel()
+        cleanupCall = null
         removeOverlay()
         super.onDestroy()
     }
@@ -714,27 +728,19 @@ class WhisperAccessibilityService : AccessibilityService() {
 
     private fun cancelTranscription() {
         Log.i(TAG, "Cancel requested")
-        // Invalidate every in-flight callback, then abort the transports.
+        // Invalidate every in-flight callback, then abort the transports. The
+        // service owns its calls — a benchmark or redo run holds its own.
         attemptToken++
-        TranscriberClient.cancel()
+        sttCall?.cancel()
+        sttCall = null
+        cleanupCall?.cancel()
+        cleanupCall = null
         FalTranscriber.cancel()
-        PostProcessor.cancel()
-        // Also interrupt the pending timeout handler so it doesn't fire.
-        handler.removeCallbacks(cancelTimeout)
         state = State.IDLE
         setBusy(false)
         setAppearance(COLOR_IDLE)
         showFeedback("Cancelled", 1500)
     }
-
-    private val cancelTimeout =
-        Runnable {
-            if (state == State.TRANSCRIBING) {
-                Log.w(TAG, "Transcription timed out")
-                cancelTranscription()
-                toast("Request timed out")
-            }
-        }
 
     private fun stopAndTranscribe() {
         state = State.TRANSCRIBING
@@ -760,6 +766,10 @@ class WhisperAccessibilityService : AccessibilityService() {
             }
         val pcm = pcmStream?.toByteArray() ?: ByteArray(0)
         pcmStream = null
+        // A local dictation never touches transcribeApi, so the previous API
+        // dictation's audio handle would otherwise be inherited by this entry.
+        pendingRecordingId = null
+        pendingRecordingDurMs = 0
 
         if (pcm.isEmpty()) {
             reset("No audio captured")
@@ -780,6 +790,9 @@ class WhisperAccessibilityService : AccessibilityService() {
         pcm: ByteArray,
         transcriber: LocalTranscriber,
     ) {
+        // Same guard as the API path: a cancel or a newer dictation must not
+        // receive this run's text.
+        val token = attemptToken
         thread {
             try {
                 // Convert 16-bit PCM bytes to float samples
@@ -794,11 +807,14 @@ class WhisperAccessibilityService : AccessibilityService() {
                 val text = transcriber.transcribe(samples, SAMPLE_RATE)
                 val ms = System.currentTimeMillis() - t0
                 Log.i(TAG, "Local transcription: ${ms}ms, ${samples.size / SAMPLE_RATE}s audio")
+                if (token != attemptToken) return@thread
 
                 handleTranscriptionResult(text)
             } catch (e: Exception) {
+                if (token != attemptToken) return@thread
                 Log.e(TAG, "Local transcription failed", e)
                 handler.post {
+                    if (token != attemptToken) return@post
                     toast("Local error: ${e.message}")
                     state = State.IDLE
                     setBusy(false)
@@ -850,9 +866,9 @@ class WhisperAccessibilityService : AccessibilityService() {
     /**
      * Writes this dictation's WAV when the user opted into keeping audio.
      *
-     * Called from the first STT attempt, which already runs off the main thread:
-     * a 25 MB encode-and-write on the UI thread would drop frames right when the
-     * user expects the text to appear. The file is written before the request so
+     * Called from the first STT attempt on a worker thread: a 25 MB
+     * encode-and-write on the UI thread would drop frames right when the user
+     * expects the text to appear. The file is written before the request so
      * a failed dictation is still retryable, and the id is only published once
      * the write actually succeeded.
      */
@@ -875,9 +891,10 @@ class WhisperAccessibilityService : AccessibilityService() {
         index: Int,
         sttLanguage: String?,
     ) {
-        // First attempt only: keep the audio once, on this background thread, so a
-        // long dictation never stalls the UI and a retry chain writes one file.
-        if (index == 0) saveAudio(wav)
+        // First attempt only: keep the audio once. transcribeApi enters here on
+        // the main thread, so the encode-and-write goes to a worker thread — a
+        // 25 MB write must never sit between the tap and the transcript.
+        if (index == 0) thread { saveAudio(wav) }
         val provider =
             usable.getOrNull(index) ?: run {
                 finishTranscriptionError("No transcription provider available")
@@ -904,7 +921,6 @@ class WhisperAccessibilityService : AccessibilityService() {
                     toast("Request timed out")
                 }
             }
-        handler.removeCallbacks(cancelTimeout)
         handler.postDelayed(timeout, budget + 5_000L)
         val onResult: (String?, String?, String?) -> Unit = cb@{ text, language, error ->
             val ms = android.os.SystemClock.elapsedRealtime() - startedAt
@@ -914,8 +930,8 @@ class WhisperAccessibilityService : AccessibilityService() {
             if (token != attemptToken) return@cb
             val blank = text.isNullOrBlank()
             if (!blank && error == null) {
-                ProviderHealth.clear(prefs(), provider)
-                ProviderHealth.markOk(prefs(), provider)
+                ProviderHealth.clear(prefs(), provider, ProviderConfig.Purpose.STT)
+                ProviderHealth.markOk(prefs(), provider, ProviderConfig.Purpose.STT)
                 LogStore.add(TAG, "STT ${provider.displayName} OK in ${ms}ms, ${text.orEmpty().length} chars${language?.let { ", lang=$it" } ?: ""}")
                 // Prefer the user-pinned language; fall back to the provider's
                 // detected language so cleanup knows what NOT to translate.
@@ -928,8 +944,9 @@ class WhisperAccessibilityService : AccessibilityService() {
                     model = ProviderConfig.sttModelFor(prefs(), provider),
                     fallbackDepth = index,
                     sttMs = ms,
+                    token = token,
                 )
-            } else if (switchToBackup(provider, error, usable, index)) {
+            } else if (switchToBackup(provider, ProviderConfig.Purpose.STT, error, usable, index)) {
                 LogStore.add(TAG, "STT ${provider.displayName} gave up in ${ms}ms: ${SecurePrefs.redact(error ?: "empty transcript")}")
                 attemptStt(wav, usable, index + 1, sttLanguage)
             } else {
@@ -956,23 +973,22 @@ class WhisperAccessibilityService : AccessibilityService() {
         when (provider) {
             Provider.FAL -> {
                 FalTranscriber.transcribe(wav, apiKey, sttLanguage) { r ->
-                    handler.removeCallbacks(cancelTimeout)
                     onResult(r.text, r.language, r.error)
                 }
             }
 
             else -> {
-                TranscriberClient.transcribe(
-                    wavData = wav,
-                    apiKey = apiKey,
-                    sttUrl = ProviderConfig.sttUrlFor(prefs(), provider),
-                    sttModel = ProviderConfig.sttModelFor(prefs(), provider),
-                    language = sttLanguage,
-                    vocabulary = DictionaryManager.outputTerms(this),
-                ) { result ->
-                    handler.removeCallbacks(cancelTimeout)
-                    onResult(result.text, result.language, result.error)
-                }
+                sttCall =
+                    TranscriberClient.transcribe(
+                        wavData = wav,
+                        apiKey = apiKey,
+                        sttUrl = ProviderConfig.sttUrlFor(prefs(), provider),
+                        sttModel = ProviderConfig.sttModelFor(prefs(), provider),
+                        language = sttLanguage,
+                        vocabulary = DictionaryManager.outputTerms(this),
+                    ) { result ->
+                        onResult(result.text, result.language, result.error)
+                    }
             }
         }
     }
@@ -984,6 +1000,7 @@ class WhisperAccessibilityService : AccessibilityService() {
      */
     private fun switchToBackup(
         provider: Provider,
+        purpose: ProviderConfig.Purpose,
         error: String?,
         candidates: List<Provider>,
         index: Int,
@@ -995,7 +1012,7 @@ class WhisperAccessibilityService : AccessibilityService() {
         // dictation and keep showing as usable.
         val next = candidates.getOrNull(index + 1)
         if (next == null && failure == ProviderHealth.Failure.OTHER) return false
-        ProviderHealth.block(prefs(), provider, error ?: failure.name.lowercase())
+        ProviderHealth.block(prefs(), provider, purpose, error ?: failure.name.lowercase())
         // Last provider in the chain: the caller reports the failure, so there is
         // nobody to hand over to — stop here.
         if (next == null) return false
@@ -1006,7 +1023,6 @@ class WhisperAccessibilityService : AccessibilityService() {
     }
 
     private fun finishTranscriptionError(message: String) {
-        handler.removeCallbacks(cancelTimeout)
         handler.post {
             toast(message)
             state = State.IDLE
@@ -1022,9 +1038,14 @@ class WhisperAccessibilityService : AccessibilityService() {
         model: String = "",
         fallbackDepth: Int = 0,
         sttMs: Long = 0,
+        // Identity of the STT attempt that produced this result. Every main-thread
+        // block re-checks it: the check on the network thread alone leaves a window
+        // where a cancelled dictation still injects its text.
+        token: Long = attemptToken,
     ) {
         if (rawText.isNullOrBlank()) {
             handler.post {
+                if (token != attemptToken) return@post
                 toast("No speech detected")
                 state = State.IDLE
                 setBusy(false)
@@ -1043,6 +1064,7 @@ class WhisperAccessibilityService : AccessibilityService() {
         when (val cmd = if (commandsOn) VoiceCommands.parse(dictText) else null) {
             VoiceCommands.Command.DeleteLast -> {
                 handler.post {
+                    if (token != attemptToken) return@post
                     val ok = deleteLastInsertion()
                     toast(if (ok) "Deleted last dictation" else "Nothing to delete")
                     state = State.IDLE
@@ -1056,6 +1078,7 @@ class WhisperAccessibilityService : AccessibilityService() {
                 // A bare "new paragraph" / "new line" inserts that break; it is
                 // not dictation, so it gets no history entry.
                 handler.post {
+                    if (token != attemptToken) return@post
                     injectText(cmd.text, feedback = null)
                     state = State.IDLE
                     setBusy(false)
@@ -1082,11 +1105,12 @@ class WhisperAccessibilityService : AccessibilityService() {
                     .filter { ProviderConfig.isReady(prefs(), ProviderConfig.Purpose.CHAT, it) }
             if (usable.isEmpty()) {
                 handler.post {
+                    if (token != attemptToken) return@post
                     toast("Post-processing needs API key. Using raw text.")
                     injectText(text)
-                    HistoryManager.append(
-                        this@WhisperAccessibilityService,
-                        entry(text, provider, model, languageHint, fallbackDepth, sttMs).copy(failure = "post-processing key missing"),
+                    record(
+                        entry(text, provider, model, languageHint, fallbackDepth, sttMs)
+                            .copy(failure = "post-processing key missing"),
                     )
                     state = State.IDLE
                     setBusy(false)
@@ -1105,11 +1129,9 @@ class WhisperAccessibilityService : AccessibilityService() {
             )
         } else {
             handler.post {
+                if (token != attemptToken) return@post
                 injectText(text)
-                HistoryManager.append(
-                    this@WhisperAccessibilityService,
-                    entry(text, provider, model, languageHint, fallbackDepth, sttMs),
-                )
+                record(entry(text, provider, model, languageHint, fallbackDepth, sttMs))
                 state = State.IDLE
                 setBusy(false)
                 setAppearance(COLOR_IDLE)
@@ -1150,23 +1172,24 @@ class WhisperAccessibilityService : AccessibilityService() {
         val reasoning = PostProcessor.Reasoning.fromKey(prefs().getString("reasoning_effort", "off"))
         LogStore.add(TAG, "Cleanup ${provider.displayName} attempt ${index + 1}/${usable.size} ($model, ${reasoning.label})")
 
-        PostProcessor.process(
-            text = text,
-            prompt = prompt,
-            apiKey = SecurePrefs.getChatApiKey(this, provider),
-            chatUrl = ProviderConfig.chatUrlFor(prefs(), provider),
-            chatModel = model,
-            reasoning = reasoning,
-            languageHint = stt.lang,
-            keepTerms = DictionaryManager.outputTerms(this),
-            toneInstruction = ToneManager.instructionFor(this@WhisperAccessibilityService, pendingTargetPackage),
-        ) { result ->
-            handler.post {
-                if (token != attemptToken) return@post
+        cleanupCall =
+            PostProcessor.process(
+                text = text,
+                prompt = prompt,
+                apiKey = SecurePrefs.getChatApiKey(this, provider),
+                chatUrl = ProviderConfig.chatUrlFor(prefs(), provider),
+                chatModel = model,
+                reasoning = reasoning,
+                languageHint = stt.lang,
+                keepTerms = DictionaryManager.outputTerms(this),
+                toneInstruction = ToneManager.instructionFor(this@WhisperAccessibilityService, pendingTargetPackage),
+            ) { result ->
+                handler.post {
+                    if (token != attemptToken) return@post
                 val cleaned = result.text
                 if (!cleaned.isNullOrBlank()) {
-                    ProviderHealth.clear(prefs(), provider)
-                    ProviderHealth.markOk(prefs(), provider)
+                    ProviderHealth.clear(prefs(), provider, ProviderConfig.Purpose.CHAT)
+                    ProviderHealth.markOk(prefs(), provider, ProviderConfig.Purpose.CHAT)
                     LogStore.add(
                         TAG,
                         "Cleanup ${provider.displayName} OK in ${android.os.SystemClock.elapsedRealtime() - startedAt}ms, ${cleaned.length} chars",
@@ -1193,7 +1216,7 @@ class WhisperAccessibilityService : AccessibilityService() {
                             cleanupMs = android.os.SystemClock.elapsedRealtime() - startedAt,
                         ),
                     )
-                } else if (switchToBackup(provider, result.error, usable, index)) {
+                } else if (switchToBackup(provider, ProviderConfig.Purpose.CHAT, result.error, usable, index)) {
                     attemptCleanup(text, prompt, usable, index + 1, stt)
                     return@post
                 } else {
@@ -1250,12 +1273,19 @@ class WhisperAccessibilityService : AccessibilityService() {
     private fun record(e: HistoryEntry) {
         // Hand the file reference over before the write: the entry owns it even if
         // the append happens on another thread.
-        pendingRecordingId = null
-        pendingRecordingDurMs = 0
+        val id = pendingRecordingId
+        if (id != null) {
+            RecordingStore.registerInFlight(id)
+            pendingRecordingId = null
+            pendingRecordingDurMs = 0
+        }
         // History is a full read + rewrite of the JSON file plus a recordings-dir
         // scan. Doing that on the main thread inside someone else's app is how you
         // get a dropped frame at the exact moment the text lands.
-        thread { HistoryManager.append(this, e) }
+        thread {
+            HistoryManager.append(this, e)
+            if (id != null) RecordingStore.releaseInFlight(id)
+        }
     }
 
     private fun reset(msg: String) {

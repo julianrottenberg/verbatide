@@ -43,8 +43,8 @@ object QuotaChecker {
             .writeTimeout(10, TimeUnit.SECONDS)
             .build()
 
-    @Volatile
-    private var running = false
+    /** Guard against two concurrent probe runs — a CAS, so races lose cleanly. */
+    private val running = java.util.concurrent.atomic.AtomicBoolean(false)
 
     enum class Verdict { OK, BLOCKED, UNKNOWN }
 
@@ -69,8 +69,11 @@ object QuotaChecker {
     ): String {
         val last = lastCheckAt(prefs)
         if (last <= 0L) return "Never checked — runs daily in the background"
-        val paused = providersToCheck(prefs).filter { ProviderHealth.isBlocked(prefs, it, now) }
-        val next = nextIn(prefs, now).let { if (it <= 0L) "due now" else "next in ${timeAgo(it)}" }
+        val paused =
+            providersToCheck(prefs).filter { p ->
+                ProviderConfig.Purpose.entries.any { ProviderHealth.isBlocked(prefs, p, it, now) }
+            }
+        val next = nextIn(prefs, now).let { if (it <= 0L) "due now" else timeUntil(it) }
         val pausedText = if (paused.isEmpty()) "" else " · paused: ${paused.joinToString(", ") { p -> p.displayName }}"
         return "Checked ${timeAgo(now - last)} · $next$pausedText"
     }
@@ -109,12 +112,12 @@ object QuotaChecker {
         onDone: ((String) -> Unit)?,
     ) {
         // A second request while one is in flight still gets an answer — returning
-        // silently left the caller's "Checking…" subtitle stuck forever.
-        if (running) {
-            onDone?.invoke("check already running")
+        // silently left the caller's "Checking…" subtitle stuck forever. CAS, so
+        // the dictation-start kick and the Check-now button cannot both pass.
+        if (!running.compareAndSet(false, true)) {
+            onDone?.invoke("check already running — last: ${lastSummary(SecurePrefs.plainPrefs(ctx)).take(120)}")
             return
         }
-        running = true
         Thread {
             val summary =
                 try {
@@ -123,7 +126,7 @@ object QuotaChecker {
                     Log.w(TAG, "usage check failed: ${e.message}")
                     "check failed"
                 } finally {
-                    running = false
+                    running.set(false)
                 }
             Handler(Looper.getMainLooper()).post { onDone?.invoke(summary) }
         }.start()
@@ -146,9 +149,17 @@ object QuotaChecker {
             if (!provider.supportsChat) {
                 if (SecurePrefs.getSttApiKey(ctx, provider).isBlank()) {
                     parts += "${provider.displayName}: no transcription key"
-                } else if (ProviderHealth.isBlocked(prefs, provider)) {
-                    ProviderHealth.clear(prefs, provider)
-                    parts += "${provider.displayName}: released, retrying on next use"
+                } else if (ProviderHealth.isBlocked(prefs, provider, ProviderConfig.Purpose.STT)) {
+                    // No chat endpoint to probe, so releasing the block here would
+                    // clear a real quota exhaustion without evidence and every
+                    // dictation would re-pay the doomed request. The 24 h TTL is
+                    // the retry: the first dictation after expiry is the probe.
+                    val left =
+                        ProviderHealth
+                            .blocked(prefs, provider, ProviderConfig.Purpose.STT)
+                            ?.let { ProviderHealth.BLOCK_TTL_MS - (System.currentTimeMillis() - it.at) }
+                            ?: 0L
+                    parts += "${provider.displayName}: paused (${timeAgo(left.coerceAtLeast(0))} left) — next dictation retries"
                 } else {
                     parts += "${provider.displayName}: not probed (transcription only)"
                 }
@@ -163,11 +174,11 @@ object QuotaChecker {
             val probe = probe(url, model, apiKey)
             when (probe.verdict) {
                 Verdict.OK -> {
-                    ProviderHealth.clear(prefs, provider)
-                    ProviderHealth.markOk(prefs, provider)
+                    ProviderHealth.clear(prefs, provider, ProviderConfig.Purpose.CHAT)
+                    ProviderHealth.markOk(prefs, provider, ProviderConfig.Purpose.CHAT)
                 }
 
-                Verdict.BLOCKED -> ProviderHealth.block(prefs, provider, probe.label)
+                Verdict.BLOCKED -> ProviderHealth.block(prefs, provider, ProviderConfig.Purpose.CHAT, probe.label)
                 // Inconclusive — leave whatever we already knew in place.
                 Verdict.UNKNOWN -> Unit
             }
@@ -267,5 +278,18 @@ object QuotaChecker {
             ageMs < 60 * 60 * 1000 -> "${ageMs / (60 * 1000)} min ago"
             ageMs < DAY_MS -> "${ageMs / (60 * 60 * 1000)} h ago"
             else -> "${ageMs / DAY_MS} d ago"
+        }
+
+    /**
+     * Countdown label for the daily check: "in 12 min", "in 3 h". Deliberately
+     * not [timeAgo] — "next in 20 h ago" reads like a bug, because it is one.
+     */
+    internal fun timeUntil(inMs: Long): String =
+        when {
+            inMs <= 0L -> "due now"
+            inMs < 60 * 1000 -> "in <1 min"
+            inMs < 60 * 60 * 1000 -> "in ${inMs / (60 * 1000)} min"
+            inMs < DAY_MS -> "in ${inMs / (60 * 60 * 1000)} h"
+            else -> "in ${inMs / DAY_MS} d"
         }
 }

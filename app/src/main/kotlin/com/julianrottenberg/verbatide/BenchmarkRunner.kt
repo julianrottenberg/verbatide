@@ -83,23 +83,45 @@ object BenchmarkRunner {
         val out = ArrayList<Sample>()
         val sttChain = ProviderHealth.sttChain(prefs).filter { SecurePrefs.getSttApiKey(ctx, it).isNotBlank() }
         for (p in sttChain) {
-            if (isCancelled()) break
+            if (isCancelled()) {
+                abortAll()
+                break
+            }
             val model = ProviderConfig.sttModelFor(prefs, p)
             onProgress("Transcribing with ${p.displayName}…")
             out += transcribeOne(ctx, wav, language, vocabulary, p, model)
         }
-        if (rawText.isNotBlank()) {
+        if (rawText.isNotBlank() && !isCancelled()) {
             val prompt = prefs.getString("post_processing_prompt", PostProcessor.DEFAULT_PROMPT) ?: PostProcessor.DEFAULT_PROMPT
             val reasoning = PostProcessor.Reasoning.fromKey(prefs.getString("reasoning_effort", "off"))
             val chatChain = ProviderHealth.chatChain(prefs).filter { SecurePrefs.getChatApiKey(ctx, it).isNotBlank() }
             for (p in chatChain) {
-                if (isCancelled()) break
+                if (isCancelled()) {
+                    abortAll()
+                    break
+                }
                 val model = ProviderConfig.chatModelFor(prefs, p)
                 onProgress("Cleaning up with ${p.displayName}…")
                 out += cleanupOne(ctx, rawText, prompt, reasoning, language, p, model)
             }
         }
+        abortAll()
         return Report(audioMs, rawText.length, out)
+    }
+
+    /**
+     * The benchmark owns its in-flight calls. The old global cancel slots are
+     * gone: a dictation running next to a benchmark must never abort this run,
+     * and this run must never abort a dictation.
+     */
+    private val inFlight = java.util.Collections.synchronizedSet(HashSet<okhttp3.Call>())
+
+    private fun abortAll() {
+        synchronized(inFlight) {
+            inFlight.forEach { runCatching { it.cancel() } }
+            inFlight.clear()
+        }
+        FalTranscriber.cancel()
     }
 
     private fun transcribeOne(
@@ -140,17 +162,18 @@ object BenchmarkRunner {
             }
 
             else -> {
-                TranscriberClient.transcribe(
-                    wavData = wav,
-                    apiKey = SecurePrefs.getSttApiKey(ctx, provider),
-                    sttUrl = ProviderConfig.sttUrlFor(prefs, provider),
-                    sttModel = model,
-                    language = language,
-                    vocabulary = vocabulary,
-                ) { r ->
-                    val ok = !r.text.isNullOrBlank() && r.error == null
-                    settle(ok, r.text, r.error ?: if (ok) null else "empty transcript")
-                }
+                inFlight +=
+                    TranscriberClient.transcribe(
+                        wavData = wav,
+                        apiKey = SecurePrefs.getSttApiKey(ctx, provider),
+                        sttUrl = ProviderConfig.sttUrlFor(prefs, provider),
+                        sttModel = model,
+                        language = language,
+                        vocabulary = vocabulary,
+                    ) { r ->
+                        val ok = !r.text.isNullOrBlank() && r.error == null
+                        settle(ok, r.text, r.error ?: if (ok) null else "empty transcript")
+                    }
             }
         }
         // The clients have internal timeouts, but a wedged socket should not hang
@@ -181,34 +204,35 @@ object BenchmarkRunner {
         var sample: Sample? = null
         val lock = Object()
         val started = System.currentTimeMillis()
-        PostProcessor.process(
-            text = text,
-            prompt = prompt,
-            apiKey = SecurePrefs.getChatApiKey(ctx, provider),
-            chatUrl = ProviderConfig.chatUrlFor(prefs, provider),
-            chatModel = model,
-            reasoning = reasoning,
-            languageHint = language,
-            keepTerms = DictionaryManager.outputTerms(ctx),
-            toneInstruction = "",
-        ) { r ->
-            synchronized(lock) {
-                if (sample == null) {
-                    val ok = !r.text.isNullOrBlank()
-                    sample =
-                        Sample(
-                            "Cleanup",
-                            provider.displayName,
-                            model,
-                            System.currentTimeMillis() - started,
-                            ok,
-                            r.text?.length ?: 0,
-                            r.error ?: if (ok) "" else "empty response",
-                        )
-                    lock.notifyAll()
+        inFlight +=
+            PostProcessor.process(
+                text = text,
+                prompt = prompt,
+                apiKey = SecurePrefs.getChatApiKey(ctx, provider),
+                chatUrl = ProviderConfig.chatUrlFor(prefs, provider),
+                chatModel = model,
+                reasoning = reasoning,
+                languageHint = language,
+                keepTerms = DictionaryManager.outputTerms(ctx),
+                toneInstruction = "",
+            ) { r ->
+                synchronized(lock) {
+                    if (sample == null) {
+                        val ok = !r.text.isNullOrBlank()
+                        sample =
+                            Sample(
+                                "Cleanup",
+                                provider.displayName,
+                                model,
+                                System.currentTimeMillis() - started,
+                                ok,
+                                r.text?.length ?: 0,
+                                r.error ?: if (ok) "" else "empty response",
+                            )
+                        lock.notifyAll()
+                    }
                 }
             }
-        }
         val deadline = System.currentTimeMillis() + 120_000L
         synchronized(lock) {
             while (sample == null && System.currentTimeMillis() < deadline) {

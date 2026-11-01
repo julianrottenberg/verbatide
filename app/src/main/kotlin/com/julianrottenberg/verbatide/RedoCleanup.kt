@@ -106,6 +106,7 @@ object RedoCleanup {
                     ProviderHealth.block(
                         ctx.getSharedPreferences("phonewhisper", Context.MODE_PRIVATE),
                         provider,
+                        ProviderConfig.Purpose.CHAT,
                         error,
                     )
                 }

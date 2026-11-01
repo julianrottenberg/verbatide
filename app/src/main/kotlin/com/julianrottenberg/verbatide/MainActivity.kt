@@ -1113,7 +1113,7 @@ class MainActivity : AppCompatActivity() {
             return "${chain.first().displayName} only — tap to add a fallback"
         }
         return chain.joinToString(" → ") { p ->
-            if (ProviderHealth.isBlocked(prefs(), p)) "${p.displayName} (no usage)" else p.displayName
+            if (ProviderHealth.isBlocked(prefs(), p, purpose)) "${p.displayName} (no usage)" else p.displayName
         }
     }
 
@@ -1122,7 +1122,7 @@ class MainActivity : AppCompatActivity() {
         val labels =
             chain.mapIndexed { i, p ->
                 val mark = if (i == 0) "1 (primary)" else "${i + 1}"
-                val dry = if (ProviderHealth.isBlocked(prefs(), p)) " · no usage" else ""
+                val dry = if (ProviderHealth.isBlocked(prefs(), p, purpose)) " · no usage" else ""
                 "$mark  ${p.displayName}$dry"
             } + "Add provider…"
         android.app.AlertDialog
@@ -1362,6 +1362,8 @@ class MainActivity : AppCompatActivity() {
 
     private var benchmarkRunning = false
 
+    @Volatile
+    private var benchmarkCancelled = false
     private fun startBenchmark() {
         if (benchmarkRunning) {
             toast("Benchmark already running")
@@ -1401,12 +1403,17 @@ class MainActivity : AppCompatActivity() {
         rawText: String,
     ) {
         benchmarkRunning = true
+        benchmarkCancelled = false
         val progress =
             android.app.ProgressDialog(this).apply {
                 isIndeterminate = true
                 setTitle("Benchmarking")
                 setMessage("Starting…")
                 setCancelable(false)
+                setButton(
+                    android.content.DialogInterface.BUTTON_NEGATIVE,
+                    "Cancel",
+                ) { _, _ -> benchmarkCancelled = true }
                 show()
             }
         Thread {
@@ -1417,7 +1424,7 @@ class MainActivity : AppCompatActivity() {
                         wav,
                         rawText,
                         onProgress = { msg -> runOnUiThread { if (!isFinishing && !isDestroyed) progress.setMessage(msg) } },
-                        isCancelled = { false },
+                        isCancelled = { benchmarkCancelled },
                     )
                 } catch (e: Exception) {
                     LogStore.add("bench", "Benchmark failed: ${SecurePrefs.redact(e.message ?: e.javaClass.simpleName)}")

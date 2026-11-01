@@ -17,11 +17,6 @@ object TranscriberClient {
         .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
-    @Volatile
-    var currentCall: Call? = null
-
-    fun cancel() { currentCall?.cancel(); currentCall = null }
-
     fun parseResponse(json: String): Result = try {
         val obj = JSONObject(json)
         when {
@@ -64,10 +59,10 @@ object TranscriberClient {
         language: String? = null,
         vocabulary: List<String> = emptyList(),
         callback: (Result) -> Unit,
-    ) {
+    ): Call? {
         if (wavData.size > MAX_WAV_BYTES) {
             callback(Result(null, "Audio too large (${wavData.size / (1024*1024)} MB > 25 MB)"))
-            return
+            return null
         }
         val bodyBuilder = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
@@ -132,41 +127,41 @@ object TranscriberClient {
         // Whole-call ceiling: a long dictation gets more room, a short one does
         // not sit for two minutes when the provider is simply stuck.
         call.timeout().timeout(budget, java.util.concurrent.TimeUnit.MILLISECONDS)
-        // Published for cancel(): the stop button and a new dictation must be able
-        // to abort the request that is actually in flight.
-        currentCall = call
-        call.enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                currentCall = null
-                // A per-call timeout surfaces as InterruptedIOException, not
-                // SocketTimeoutException — both have to read as "timeout" in the
-                // history, otherwise the cause looks like a network failure.
-                val timedOut = e is java.io.InterruptedIOException || e is java.net.SocketTimeoutException
-                callback(Result(null, if (timedOut) "timeout after ${budget / 1000}s" else e.message))
-            }
-            override fun onResponse(call: Call, response: Response) {
-                currentCall = null
-                val body = response.body?.string() ?: ""
-                if (!response.isSuccessful) {
-                    // Keep the status code: ProviderHealth.classify() drives the
-                    // backup switch from it (402 = out of quota, 401 = bad key),
-                    // and providers disagree wildly about error body shapes.
-                    val detail = if (body.isBlank()) null else runCatching { parseResponse(body).error }.getOrNull()
-                    callback(Result(null, "HTTP ${response.code}" + (detail?.let { ": $it" } ?: "")))
-                    return
+        // never clobber another caller's in-flight call.
+        call.enqueue(
+            object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    // A per-call timeout surfaces as InterruptedIOException, not
+                    // SocketTimeoutException — both have to read as "timeout" in the
+                    // history, otherwise the cause looks like a network failure.
+                    val timedOut = e is java.io.InterruptedIOException || e is java.net.SocketTimeoutException
+                    callback(Result(null, if (timedOut) "timeout after ${budget / 1000}s" else e.message))
                 }
-                if (body.length > MAX_RESPONSE_CHARS + 2048) {
-                    callback(Result(null, "Response too large (${body.length} chars)"))
-                    return
+
+                override fun onResponse(call: Call, response: Response) {
+                    val body = response.body?.string() ?: ""
+                    if (!response.isSuccessful) {
+                        // Keep the status code: ProviderHealth.classify() drives the
+                        // backup switch from it (402 = out of quota, 401 = bad key),
+                        // and providers disagree wildly about error body shapes.
+                        val detail = if (body.isBlank()) null else runCatching { parseResponse(body).error }.getOrNull()
+                        callback(Result(null, "HTTP ${response.code}" + (detail?.let { ": $it" } ?: "")))
+                        return
+                    }
+                    if (body.length > MAX_RESPONSE_CHARS + 2048) {
+                        callback(Result(null, "Response too large (${body.length} chars)"))
+                        return
+                    }
+                    val parsed = parseResponse(body)
+                    // Whisper can echo the prompt back on silence; never let it reach the user.
+                    val capped = parsed.text
+                        ?.take(MAX_RESPONSE_CHARS)
+                        ?.let { DictionaryManager.stripPromptEcho(it, promptText) }
+                    callback(if (capped != null) Result(capped, null, parsed.language) else parsed)
                 }
-                val parsed = parseResponse(body)
-                // Whisper can echo the prompt back on silence; never let it reach the user.
-                val capped = parsed.text
-                    ?.take(MAX_RESPONSE_CHARS)
-                    ?.let { DictionaryManager.stripPromptEcho(it, promptText) }
-                callback(if (capped != null) Result(capped, null, parsed.language) else parsed)
-            }
-        })
+            },
+        )
+        return call
     }
 
     /** MiniMax's ASR endpoint is OpenAI-shaped but takes `language` as a header. */

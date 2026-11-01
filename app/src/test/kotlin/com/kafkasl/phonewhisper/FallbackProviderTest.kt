@@ -34,14 +34,14 @@ class FallbackProviderTest {
 
     @Test fun blockedPrimaryLeavesOnlyTheBackup() {
         val p = prefs()
-        ProviderHealth.block(p, Provider.MISTRAL, "402 out of quota")
+        ProviderHealth.block(p, Provider.MISTRAL, ProviderConfig.Purpose.STT, "402 out of quota")
         assertEquals(listOf(Provider.MINIMAX), ProviderHealth.sttChain(p))
     }
 
     @Test fun allBlockedStillTriesThePrimaryFirst() {
         val p = prefs()
-        ProviderHealth.block(p, Provider.MISTRAL, "402", t0)
-        ProviderHealth.block(p, Provider.MINIMAX, "401", t0)
+        ProviderHealth.block(p, Provider.MISTRAL, ProviderConfig.Purpose.STT, "402", t0)
+        ProviderHealth.block(p, Provider.MINIMAX, ProviderConfig.Purpose.STT, "401", t0)
         assertEquals(
             listOf(Provider.MISTRAL, Provider.MINIMAX),
             ProviderHealth.order(p, ProviderConfig.Purpose.STT, t0 + 1_000),
@@ -50,9 +50,9 @@ class FallbackProviderTest {
 
     @Test fun blockExpiresAfterItsTtl() {
         val p = prefs()
-        ProviderHealth.block(p, Provider.MISTRAL, "402", t0)
-        assertTrue(ProviderHealth.isBlocked(p, Provider.MISTRAL, t0 + 1_000))
-        assertNull(ProviderHealth.blocked(p, Provider.MISTRAL, t0 + ProviderHealth.BLOCK_TTL_MS + 1))
+        ProviderHealth.block(p, Provider.MISTRAL, ProviderConfig.Purpose.STT, "402", t0)
+        assertTrue(ProviderHealth.isBlocked(p, Provider.MISTRAL, ProviderConfig.Purpose.STT, t0 + 1_000))
+        assertNull(ProviderHealth.blocked(p, Provider.MISTRAL, ProviderConfig.Purpose.STT, t0 + ProviderHealth.BLOCK_TTL_MS + 1))
         assertEquals(
             listOf(Provider.MISTRAL, Provider.MINIMAX),
             ProviderHealth.order(p, ProviderConfig.Purpose.STT, t0 + ProviderHealth.BLOCK_TTL_MS + 1),
@@ -61,8 +61,8 @@ class FallbackProviderTest {
 
     @Test fun clearingABlockRestoresThePrimary() {
         val p = prefs()
-        ProviderHealth.block(p, Provider.MISTRAL, "402")
-        ProviderHealth.clear(p, Provider.MISTRAL)
+        ProviderHealth.block(p, Provider.MISTRAL, ProviderConfig.Purpose.STT, "402")
+        ProviderHealth.clear(p, Provider.MISTRAL, ProviderConfig.Purpose.STT)
         assertEquals(listOf(Provider.MISTRAL, Provider.MINIMAX), ProviderHealth.sttChain(p))
     }
 
