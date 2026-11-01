@@ -1,7 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 11 and below counterpart of data_extraction_rules.xml. The two files
+  must exclude the same things: this one silently did not, so flipping
+  `allowBackup` (or a device that ignores it for device-to-device transfer)
+  would have shipped transcripts, retained audio and the diagnostic log off the
+  phone while the Android 12+ rules looked correct.
+
+  The file domain is rooted at filesDir(), so paths are relative to it.
+-->
 <full-backup-content>
-    <!-- Exclude API keys and custom endpoints from auto-backup / device transfer. -->
+    <!-- API keys and custom endpoints. -->
     <exclude domain="sharedpref" path="phonewhisper.xml" />
     <exclude domain="sharedpref" path="phonewhisper_secure.xml" />
-    <exclude domain="file" path="../shared_prefs/phonewhisper_secure.xml" />
+    <!-- Retained dictation audio, transcripts and the diagnostic log. -->
+    <exclude domain="file" path="recordings/" />
+    <exclude domain="file" path="transcription_history.json" />
+    <exclude domain="file" path="verbatide.log" />
 </full-backup-content>

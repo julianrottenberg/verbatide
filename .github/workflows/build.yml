@@ -20,6 +20,10 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Nothing here pushes; leaving the token in .git/config only gives a
+          # compromised step a credential it never needed.
+          persist-credentials: false
 
       - uses: actions/setup-java@v4
         with:
@@ -74,6 +78,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-java@v4
         with:
@@ -91,21 +97,39 @@ jobs:
           yes | "$SDKMANAGER" --licenses > /dev/null
           "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace
+      - name: Build release APK
+        # Release build type: not debuggable, signed with the production key.
+        # The debug build (job above) is the dev artifact; this one is shipped.
+        # These env vars are what register the `ci` signing config in
+        # app/build.gradle.kts — without them Gradle builds an *unsigned* APK
+        # that Android refuses to install, so a missing secret has to fail here
+        # instead of attaching nothing to the release.
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "${ANDROID_KEYSTORE_BASE64}" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not set — refusing to publish an unsigned release APK"
+            exit 1
+          fi
+          ./gradlew assembleRelease --stacktrace
 
       - name: Rename APK to verbatide
         run: |
-          APK="app/build/outputs/apk/debug/app-debug.apk"
-          if [ -f "$APK" ]; then
-            VER=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
-            cp "$APK" "app/build/outputs/apk/debug/verbatide-v${VER}.apk"
-            ls -lh app/build/outputs/apk/debug/
+          APK="app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$APK" ]; then
+            echo "::error::$APK was not produced"
+            exit 1
           fi
+          VER=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          cp "$APK" "app/build/outputs/apk/release/verbatide-v${VER}.apk"
+          ls -lh app/build/outputs/apk/release/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/debug/verbatide-*.apk
-          fail_on_unmatched_files: false
+          files: app/build/outputs/apk/release/verbatide-*.apk
+          fail_on_unmatched_files: true
           generate_release_notes: true

@@ -42,13 +42,24 @@ android {
                     .asFile
             ksFile.parentFile.mkdirs()
             ksFile.writeBytes(BASE64_DECODER.decode(ksB64))
-            named("debug") {
+            create("ci") {
                 storeFile = ksFile
                 storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("ANDROID_KEY_ALIAS")
                 keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
                 storeType = "PKCS12"
             }
+        }
+    }
+    buildTypes {
+        release {
+            // R8 needs proguard rules for the vendored sherpa-onnx JNI bindings
+            // and org.json reflection before minification is safe; ship readable
+            // until those are proven on a device.
+            isMinifyEnabled = false
+            // Production key only when CI provides it — local release builds
+            // stay unsigned rather than falling back to the debug key.
+            signingConfigs.findByName("ci")?.let { signingConfig = it }
         }
     }
 

@@ -347,14 +347,14 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
                         // surface a compact "HTTP <code>: <detail>" to the caller.
                         // Redacted: a provider that echoes the request back would
                         // otherwise put the live key in logcat.
-                        Log.w(TAG, "cleanup HTTP ${response.code} from $chatUrl: ${SecurePrefs.redact(responseBody).take(500)}")
+                        Log.w(TAG, "cleanup HTTP ${response.code} from $chatUrl (${responseBody.length} chars)")
                         val detail = runCatching { extractError(JSONObject(responseBody)) }.getOrNull()
                         callback(Result(null, "HTTP ${response.code}" + (detail?.let { ": $it" } ?: "")))
                         return
                     }
                     val parsed = parseResponse(responseBody)
                     if (parsed.error != null) {
-                        Log.w(TAG, "cleanup unparseable/error body from $chatUrl: ${parsed.error} — ${SecurePrefs.redact(responseBody).take(300)}")
+                        Log.w(TAG, "cleanup unparseable/error body from $chatUrl: ${parsed.error} (${responseBody.length} chars)")
                     }
                     val capped = parsed.text?.let { truncatedOutput(it) }
                     callback(if (capped != null) Result(capped, null) else parsed)

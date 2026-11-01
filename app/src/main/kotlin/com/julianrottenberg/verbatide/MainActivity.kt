@@ -1759,7 +1759,7 @@ class MainActivity : AppCompatActivity() {
                 "${prefs().getInt(
                     HistoryManager.KEY_HISTORY_MAX_MB,
                     HistoryManager.DEF_MAX_MB,
-                )} MB · ${prefs().getInt(HistoryManager.KEY_HISTORY_MAX_DAYS, HistoryManager.DEF_MAX_DAYS)} days — tap to change",
+                )} MB of history · ${prefs().getInt(HistoryManager.KEY_HISTORY_MAX_DAYS, HistoryManager.DEF_MAX_DAYS)} days — tap to change",
             ) {
                 val curMb = prefs().getInt(HistoryManager.KEY_HISTORY_MAX_MB, HistoryManager.DEF_MAX_MB)
                 val curDays = prefs().getInt(HistoryManager.KEY_HISTORY_MAX_DAYS, HistoryManager.DEF_MAX_DAYS)

@@ -946,6 +946,9 @@ class WhisperAccessibilityService : AccessibilityService() {
                     sttMs = ms,
                     token = token,
                 )
+            } else if (blank && error == null && retryNextOnEmpty(provider, usable, index)) {
+                LogStore.add(TAG, "STT ${provider.displayName} returned nothing in ${ms}ms — trying ${usable[index + 1].displayName}")
+                attemptStt(wav, usable, index + 1, sttLanguage)
             } else if (switchToBackup(provider, ProviderConfig.Purpose.STT, error, usable, index)) {
                 LogStore.add(TAG, "STT ${provider.displayName} gave up in ${ms}ms: ${SecurePrefs.redact(error ?: "empty transcript")}")
                 attemptStt(wav, usable, index + 1, sttLanguage)
@@ -1019,6 +1022,24 @@ class WhisperAccessibilityService : AccessibilityService() {
         Log.w(TAG, "${provider.displayName} unusable (${SecurePrefs.redact(error)}) — switching to ${next.displayName}")
         LogStore.add(TAG, "Switch: ${provider.displayName} → ${next.displayName} (${failure.name.lowercase()})")
         handler.post { toast("${provider.displayName} unavailable — trying ${next.displayName}") }
+        return true
+    }
+
+    /**
+     * Retries the next chain entry when a provider answered 200 with nothing in
+     * it. Unlike [switchToBackup] this never parks the provider: a recording of
+     * silence looks exactly like an ASR that dropped the audio, so a 24 h block
+     * would penalise a healthy provider for the user's quiet room.
+     */
+    private fun retryNextOnEmpty(
+        provider: Provider,
+        candidates: List<Provider>,
+        index: Int,
+    ): Boolean {
+        val next = candidates.getOrNull(index + 1) ?: return false
+        Log.w(TAG, "${provider.displayName} returned an empty transcript — trying ${next.displayName}")
+        LogStore.add(TAG, "Switch: ${provider.displayName} → ${next.displayName} (empty result)")
+        handler.post { toast("${provider.displayName} returned nothing — trying ${next.displayName}") }
         return true
     }
 
@@ -1518,6 +1539,6 @@ class WhisperAccessibilityService : AccessibilityService() {
     private fun prefs() = getSharedPreferences("phonewhisper", MODE_PRIVATE)
 
     private fun toast(msg: String) {
-        handler.post { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show() }
+        handler.post { Toast.makeText(this@WhisperAccessibilityService, msg, Toast.LENGTH_SHORT).show() }
     }
 }

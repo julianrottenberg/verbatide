@@ -105,7 +105,7 @@ object FalTranscriber {
                     return@thread
                 }
 
-                Log.d(TAG, "Wizper submit: ${respBody.take(500)} — payload language=${payload.opt("language")}")
+                Log.d(TAG, "Wizper submit ok (${respBody.length} chars), language=${payload.opt("language")}")
                 val obj = try { JSONObject(respBody) } catch (e: Exception) {
                     callback(Result(null, "fal.ai: invalid JSON (${e.message})"))
                     return@thread
@@ -256,7 +256,7 @@ object FalTranscriber {
                     // Let the caller handle errors; for the final-timeout probe,
                     // silently return null so we can report the timeout instead.
                     val alreadyCalled = body.contains("\"error\"")
-                    if (alreadyCalled) Log.w(TAG, "fetch ${r.code}: $body")
+                    if (alreadyCalled) Log.w(TAG, "fetch ${r.code} (${body.length} chars)")
                     return@use null
                 }
                 val obj: JSONObject? = try { JSONObject(body) } catch (e: Exception) {

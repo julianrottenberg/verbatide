@@ -49,12 +49,18 @@ object SettingsBackup {
             "use_post_processing",
             DictionaryManager.KEY_DICT_ENABLED,
             VoiceCommands.KEY_ENABLED,
+            // History and audio retention. Without these an import silently
+            // re-enabled history (or kept the old cap) on a device that had it
+            // switched off, which is a privacy surprise, not a setting.
+            HistoryManager.KEY_HISTORY_ENABLED,
+            RecordingStore.KEY_KEEP_AUDIO,
         )
 
     private val INT_KEYS =
         listOf(
             HistoryManager.KEY_HISTORY_MAX_MB,
             HistoryManager.KEY_HISTORY_MAX_DAYS,
+            RecordingStore.KEY_KEEP_MAX,
         )
 
     fun export(
@@ -79,6 +85,7 @@ object SettingsBackup {
     }
 
     /** Key names an export may contain, so import can refuse anything else. */
+
     /**
      * Provider slots only. The `_owner` stamps are deliberately excluded: they
      * decide *which* provider may read the shared slot, so an imported
@@ -98,6 +105,45 @@ object SettingsBackup {
             val root = JSONObject(json)
             // Tolerate a bare {key: value} object too, not just the wrapped format.
             val values = root.optJSONObject("values") ?: root
+            // Hostile-import guard (runs before anything is written, so a
+            // refusal leaves prefs untouched). An imported endpoint routes the
+            // user's keys, audio and dictated text to whoever hosts it, so the
+            // URL rules the Settings dialog enforces apply here too. An import
+            // that both swaps an endpoint and reshuffles provider selection is
+            // refused outright — apply the two halves as separate imports.
+            val urlKeys = listOf("custom_stt_base_url", "custom_chat_base_url")
+            val identityKeys =
+                listOf("provider", "stt_provider", "chat_provider", "stt_chain", "chat_chain", "backup_provider")
+            for (urlKey in urlKeys) {
+                if (!values.has(urlKey)) continue
+                val url = values.getString(urlKey).trim()
+                val clearOk = url.startsWith("http://") && ProviderConfig.isLoopbackHttp(url)
+                if (!ProviderConfig.isValidCustomUrl(url) || (url.startsWith("http://") && !clearOk)) {
+                    throw IllegalArgumentException(
+                        "Refusing import: $urlKey is not a valid https endpoint (cleartext http only for localhost)",
+                    )
+                }
+            }
+            for (idKey in identityKeys) {
+                if (!values.has(idKey)) continue
+                val entries =
+                    values
+                        .getString(idKey)
+                        .split(',')
+                        .map { it.trim() }
+                        .filter { it.isNotEmpty() }
+                val unknown = entries.any { name -> Provider.entries.none { it.name.equals(name, ignoreCase = true) } }
+                if (unknown) {
+                    throw IllegalArgumentException("Refusing import: $idKey contains an unknown provider name")
+                }
+            }
+            val swapsEndpoint = urlKeys.any { values.has(it) && values.getString(it) != prefs.getString(it, null) }
+            val swapsIdentity = identityKeys.any { values.has(it) && values.getString(it) != prefs.getString(it, null) }
+            if (swapsEndpoint && swapsIdentity) {
+                throw IllegalArgumentException(
+                    "Refusing import: it changes both a custom endpoint and the provider selection — import the endpoint and provider parts separately",
+                )
+            }
             val editor = prefs.edit()
             var count = 0
             for (k in STRING_KEYS) {

@@ -42,8 +42,27 @@ object SecurePrefs {
     @Volatile
     private var encryptedPrefs: SharedPreferences? = null
 
+    // Failure timestamp: retry the keystore after KEYSTORE_RETRY_MS instead of
+    // latching for the whole process — the accessibility service lives for days,
+    // and a permanent latch turned one transient keystore failure into
+    // plaintext keys for the rest of the run. Surfaced in Settings via isEncrypted().
     @Volatile
-    private var encryptedUnavailable = false
+    private var encryptedUnavailableAt = 0L
+
+    private const val KEYSTORE_RETRY_MS = 60_000L
+
+    /** Every credential value seen through this class, for redact-by-value. */
+    private val seenSecrets: MutableSet<String> =
+        java.util.concurrent.ConcurrentHashMap
+            .newKeySet()
+
+    private fun rememberKey(
+        key: String,
+        value: String,
+    ): String {
+        if (value.length >= 8 && key.contains("api_key") && !key.endsWith(OWNER_SUFFIX)) seenSecrets.add(value)
+        return value
+    }
 
     fun plainPrefs(ctx: Context): SharedPreferences = ctx.getSharedPreferences(PLAIN_NAME, Context.MODE_PRIVATE)
 
@@ -54,7 +73,8 @@ object SecurePrefs {
      */
     fun encryptedPrefsOrNull(ctx: Context): SharedPreferences? {
         encryptedPrefs?.let { return it }
-        if (encryptedUnavailable) return null
+        val failedAt = encryptedUnavailableAt
+        if (failedAt != 0L && android.os.SystemClock.elapsedRealtime() - failedAt < KEYSTORE_RETRY_MS) return null
         return try {
             val masterKey =
                 MasterKey
@@ -70,11 +90,12 @@ object SecurePrefs {
                     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
                 )
             migrateIfNeeded(ctx, created)
+            encryptedUnavailableAt = 0L
             encryptedPrefs = created
             created
         } catch (_: Exception) {
             // Keystore unavailable (emulator without secure storage, etc.)
-            encryptedUnavailable = true
+            encryptedUnavailableAt = android.os.SystemClock.elapsedRealtime()
             null
         }
     }
@@ -145,6 +166,11 @@ object SecurePrefs {
     fun getKey(
         ctx: Context,
         key: String,
+    ): String = rememberKey(key, getKeyRaw(ctx, key))
+
+    private fun getKeyRaw(
+        ctx: Context,
+        key: String,
     ): String {
         val enc = encryptedPrefsOrNull(ctx)
         if (enc != null) {
@@ -197,6 +223,7 @@ object SecurePrefs {
         value: String,
     ) {
         val trimmed = value.trim()
+        if (trimmed.length >= 8 && key.contains("api_key") && !key.endsWith(OWNER_SUFFIX)) seenSecrets.add(trimmed)
         val enc = encryptedPrefsOrNull(ctx)
         if (enc != null) {
             try {
@@ -288,7 +315,7 @@ object SecurePrefs {
         // Shared slot is only trusted when stamped with this provider's name.
         val owner = getRaw(ctx, purposeKey + OWNER_SUFFIX)
         if (owner.isNotBlank() && owner.equals(provider.name, ignoreCase = true)) {
-            return getRaw(ctx, purposeKey)
+            return rememberKey(purposeKey, getRaw(ctx, purposeKey))
         }
         return ""
     }
@@ -331,8 +358,17 @@ object SecurePrefs {
      * strip anything key-shaped before it lands on disk.
      */
     fun redact(text: String?): String {
-        if (text.isNullOrBlank()) return ""
-        return text
+        val input = text ?: return ""
+        if (input.isBlank()) return ""
+        // By value first: covers key shapes the patterns below don't know —
+        // Together `tgp_…`, Mistral's bare random string, fal's `keyid:secret`,
+        // any custom provider. Values register in [seenSecrets] as soon as a
+        // key is read or written through this class.
+        var out = input
+        for (s in seenSecrets) {
+            if (s.length >= 8 && out.contains(s)) out = out.replace(s, "[redacted]")
+        }
+        return out
             .replace(Regex("""\b(sk|gsk|xai|pplx|hf)[-_][A-Za-z0-9_\-]{8,}"""), "[redacted]")
             .replace(Regex("""eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"""), "[redacted]")
     }
