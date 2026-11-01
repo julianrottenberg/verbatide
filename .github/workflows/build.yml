@@ -98,6 +98,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # Full history: the Forgejo release step below derives release
+          # notes from the commit log between the previous tag and this one.
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/setup-java@v4
@@ -158,9 +161,59 @@ jobs:
           cp "$APK" "app/build/outputs/apk/release/verbatide-v${VER}.apk"
           ls -lh app/build/outputs/apk/release/
 
+        # Forgejo's action mirror (data.forgejo.org) does not carry this
+        # third-party action, so on Forgejo the release is published with
+        # plain API calls in the step below.
       - name: Create GitHub Release
+        if: github.server_url == 'https://github.com'
         uses: softprops/action-gh-release@v2
         with:
           files: app/build/outputs/apk/release/verbatide-*.apk
           fail_on_unmatched_files: true
           generate_release_notes: true
+
+      - name: Create Forgejo Release
+        if: github.server_url != 'https://github.com'
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          API="$GITHUB_SERVER_URL/api/v1"
+          REPO="$GITHUB_REPOSITORY"
+          TAG="$GITHUB_REF_NAME"
+          APK="$(ls app/build/outputs/apk/release/verbatide-*.apk)"
+          [ -f "$APK" ] || { echo "::error::no APK found"; exit 1; }
+
+          # Release notes: commits between the previous tag and this one.
+          PREV="$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || true)"
+          if [ -n "$PREV" ]; then
+            LOG="$(git log --oneline --no-decorate "$PREV..HEAD")"
+          else
+            LOG="$(git log --oneline --no-decorate -20)"
+          fi
+          BODY="$(printf '%s' "$LOG" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
+
+          # Idempotent: reuse the release if a re-run already created it.
+          ID="$(
+            curl -fsS -H "Authorization: token $TOKEN" "$API/repos/$REPO/releases/tags/$TAG" 2>/dev/null \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' 2>/dev/null || true
+          )"
+          if [ -z "${ID:-}" ]; then
+            ID="$(
+              curl -fsS -H "Authorization: token $TOKEN" -H "Content-Type: application/json" \
+                -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"body\":$BODY,\"draft\":false,\"prerelease\":false}" \
+                "$API/repos/$REPO/releases" \
+                | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'
+            )"
+            echo "Created release $TAG (id $ID)"
+          else
+            echo "Release $TAG already exists (id $ID) — updating notes"
+            curl -fsS -X PATCH -H "Authorization: token $TOKEN" -H "Content-Type: application/json" \
+              -d "{\"body\":$BODY}" "$API/repos/$REPO/releases/$ID" > /dev/null
+          fi
+
+          curl -fsS -X POST -H "Authorization: token $TOKEN" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary "@$APK" \
+            "$API/repos/$REPO/releases/$ID/assets?name=$(basename "$APK")" > /dev/null
+          echo "Uploaded $(basename "$APK") to release $TAG"
